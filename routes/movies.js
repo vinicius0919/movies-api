@@ -249,4 +249,57 @@ router.delete(
   }
 );
 
+router.get(
+  "/favorites/list",
+  async (req, res) => {
+    try {
+      const movies =
+        await Movie.find({
+          favorite: true,
+        });
+
+      res.json(movies);
+    } catch (error) {
+      res.status(500).json({
+        error:
+          "Erro ao buscar favoritos",
+      });
+    }
+  }
+);
+
+router.patch(
+  "/:id/favorite",
+  async (req, res) => {
+    try {
+      const movie =
+        await Movie.findById(
+          req.params.id
+        );
+
+      if (!movie) {
+        return res
+          .status(404)
+          .json({
+            error:
+              "Filme não encontrado",
+          });
+      }
+
+      movie.favorite =
+        !movie.favorite;
+
+      await movie.save();
+
+      res.json(movie);
+    } catch (error) {
+      res.status(500).json({
+        error:
+          "Erro ao favoritar",
+      });
+    }
+  }
+);
+
+
 module.exports = router;
