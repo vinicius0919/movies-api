@@ -1,93 +1,252 @@
 const express = require("express");
 
-const {
-  readMovies,
-  saveMovies,
-} = require("../utils/file");
+const Movie = require("../models/Movie");
 
 const {
   validateVideoUrl,
-} = require("../services/videoValidationService");
+} = require(
+  "../services/videoValidationService"
+);
 
 const router = express.Router();
 
-router.get("/", async (req, res) => {
-  const movies = await readMovies();
+/* =========================================
+   GET ALL
+========================================= */
 
-  res.json(movies);
+router.get("/", async (req, res) => {
+  try {
+    const movies =
+      await Movie.find().sort({
+        createdAt: -1,
+      });
+
+    res.json(movies);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error:
+        "Erro ao buscar filmes",
+    });
+  }
 });
+
+/* =========================================
+   GET BY ID
+========================================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const movie =
+      await Movie.findById(
+        req.params.id
+      );
+
+    if (!movie) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Filme não encontrado",
+        });
+    }
+
+    res.json(movie);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error:
+        "Erro ao buscar filme",
+    });
+  }
+});
+
+/* =========================================
+   CREATE
+========================================= */
 
 router.post("/", async (req, res) => {
   try {
     const movie = req.body;
 
     if (!movie.title) {
-      return res.status(400).json({
-        error: "Título obrigatório",
-      });
+      return res
+        .status(400)
+        .json({
+          error:
+            "Título obrigatório",
+        });
     }
 
     if (!movie.videoUrl) {
-      return res.status(400).json({
-        error: "videoUrl obrigatória",
-      });
+      return res
+        .status(400)
+        .json({
+          error:
+            "URL do vídeo obrigatória",
+        });
     }
 
-    const validUrl = await validateVideoUrl(
-      movie.videoUrl
-    );
+    const validUrl =
+      await validateVideoUrl(
+        movie.videoUrl
+      );
 
     if (!validUrl) {
-      return res.status(400).json({
-        error: "URL inválida",
-      });
+      return res
+        .status(400)
+        .json({
+          error:
+            "URL inválida",
+        });
     }
 
-    const movies = await readMovies();
-
-    const exists = movies.find(
-      (m) => m.tmdbId === movie.tmdbId
-    );
+    const exists =
+      await Movie.findOne({
+        tmdbId: movie.tmdbId,
+      });
 
     if (exists) {
-      return res.status(400).json({
-        error: "Filme já cadastrado",
-      });
+      return res
+        .status(400)
+        .json({
+          error:
+            "Filme já cadastrado",
+        });
     }
 
-    movies.push({
-      ...movie,
-      id: Date.now(),
-    });
+    const newMovie =
+      await Movie.create(movie);
 
-    await saveMovies(movies);
-
-    res.json({
-      success: true,
-    });
+    res.status(201).json(
+      newMovie
+    );
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
-      error: "Erro ao cadastrar filme",
+      error:
+        "Erro ao criar filme",
     });
   }
 });
 
-router.delete("/:id", async (req, res) => {
-  const id = Number(req.params.id);
+/* =========================================
+   UPDATE
+========================================= */
 
-  const movies = await readMovies();
+router.put("/:id", async (req, res) => {
+  try {
+    const movie =
+      await Movie.findById(
+        req.params.id
+      );
 
-  const filtered = movies.filter(
-    (m) => m.id !== id
-  );
+    if (!movie) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Filme não encontrado",
+        });
+    }
 
-  await saveMovies(filtered);
+    const {
+      title,
+      overview,
+      poster,
+      backdrop,
+      year,
+      videoUrl,
+    } = req.body;
 
-  res.json({
-    success: true,
-  });
+    if (videoUrl) {
+      const validUrl =
+        await validateVideoUrl(
+          videoUrl
+        );
+
+      if (!validUrl) {
+        return res
+          .status(400)
+          .json({
+            error:
+              "URL inválida",
+          });
+      }
+    }
+
+    movie.title =
+      title || movie.title;
+
+    movie.overview =
+      overview || movie.overview;
+
+    movie.poster =
+      poster || movie.poster;
+
+    movie.backdrop =
+      backdrop || movie.backdrop;
+
+    movie.year =
+      year || movie.year;
+
+    movie.videoUrl =
+      videoUrl || movie.videoUrl;
+
+    await movie.save();
+
+    res.json(movie);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error:
+        "Erro ao atualizar filme",
+    });
+  }
 });
+
+/* =========================================
+   DELETE
+========================================= */
+
+router.delete(
+  "/:id",
+  async (req, res) => {
+    try {
+      const movie =
+        await Movie.findById(
+          req.params.id
+        );
+
+      if (!movie) {
+        return res
+          .status(404)
+          .json({
+            error:
+              "Filme não encontrado",
+          });
+      }
+
+      await movie.deleteOne();
+
+      res.json({
+        success: true,
+        message:
+          "Filme removido",
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).json({
+        error:
+          "Erro ao remover filme",
+      });
+    }
+  }
+);
 
 module.exports = router;
