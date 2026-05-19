@@ -1,3 +1,5 @@
+// routes/movies.js
+
 const express = require("express");
 
 const Movie = require("../models/Movie");
@@ -16,12 +18,57 @@ const router = express.Router();
 
 router.get("/", async (req, res) => {
   try {
-    const movies =
-      await Movie.find().sort({
-        createdAt: -1,
-      });
+    const page =
+      Number(req.query.page) || 1;
 
-    res.json(movies);
+    const limit =
+      Number(req.query.limit) || 20;
+
+    const search =
+      req.query.search || "";
+
+    const skip =
+      (page - 1) * limit;
+
+    const query = {};
+
+    if (search) {
+      query.title = {
+        $regex: search,
+        $options: "i",
+      };
+    }
+
+    const [movies, total] =
+      await Promise.all([
+        Movie.find(query)
+          .sort({
+            createdAt: -1,
+          })
+          .skip(skip)
+          .limit(limit),
+
+        Movie.countDocuments(
+          query
+        ),
+      ]);
+
+    const totalPages =
+      Math.ceil(total / limit);
+
+    res.json({
+      data: movies,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage:
+          page < totalPages,
+        hasPrevPage:
+          page > 1,
+      },
+    });
   } catch (error) {
     console.error(error);
 
@@ -31,7 +78,6 @@ router.get("/", async (req, res) => {
     });
   }
 });
-
 /* =========================================
    GET BY ID
 ========================================= */
@@ -253,12 +299,49 @@ router.get(
   "/favorites/list",
   async (req, res) => {
     try {
-      const movies =
-        await Movie.find({
-          favorite: true,
-        });
+      const page =
+        Number(req.query.page) || 1;
 
-      res.json(movies);
+      const limit =
+        Number(req.query.limit) || 20;
+
+      const skip =
+        (page - 1) * limit;
+
+      const query = {
+        favorite: true,
+      };
+
+      const [movies, total] =
+        await Promise.all([
+          Movie.find(query)
+            .sort({
+              createdAt: -1,
+            })
+            .skip(skip)
+            .limit(limit),
+
+          Movie.countDocuments(
+            query
+          ),
+        ]);
+
+      const totalPages =
+        Math.ceil(total / limit);
+
+      res.json({
+        data: movies,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage:
+            page < totalPages,
+          hasPrevPage:
+            page > 1,
+        },
+      });
     } catch (error) {
       res.status(500).json({
         error:
