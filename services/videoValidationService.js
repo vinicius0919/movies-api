@@ -1,38 +1,16 @@
-const axios = require("axios");
-
-async function validateVideoUrl(url) {
+function validateVideoUrl(url) {
   try {
-    if (!url.startsWith("http")) {
-      return false;
-    }
+    if (!url) return false;
 
-    if (
-      !url.includes(".mp4") &&
-      !url.includes(".m3u8")
-    ) {
-      return false;
-    }
-
-    const response = await axios({
-      method: "GET",
-      url,
-      headers: {
-        Range: "bytes=0-1",
-        Referer:
-          "https://www.tokyvideo.com/",
-        Origin:
-          "https://www.tokyvideo.com",
-        "User-Agent":
-          "Mozilla/5.0",
-      },
-      validateStatus: () => true,
-    });
+    const parsed = new URL(url);
 
     return (
-      response.status === 200 ||
-      response.status === 206
+      parsed.protocol.startsWith("http") &&
+      parsed.hostname.includes(
+        "tokyvideo.com"
+      )
     );
-  } catch (error) {
+  } catch {
     return false;
   }
 }

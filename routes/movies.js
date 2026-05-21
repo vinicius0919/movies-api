@@ -127,28 +127,22 @@ router.post("/", async (req, res) => {
     }
 
     if (!movie.videoUrl) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "URL do vídeo obrigatória",
-        });
+      return res.status(400).json({
+        error:
+          "URL do vídeo obrigatória",
+      });
     }
-
+    
     const validUrl =
-      await validateVideoUrl(
+      validateVideoUrl(
         movie.videoUrl
       );
-
+    
     if (!validUrl) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "URL inválida",
-        });
+      return res.status(400).json({
+        error: "URL inválida",
+      });
     }
-
     const exists =
       await Movie.findOne({
         tmdbId: movie.tmdbId,

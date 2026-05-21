@@ -3,7 +3,7 @@ const express = require("express");
 const {
   getVideoData,
   streamVideo,
-} = require("../services/tokyovideoService");
+} = require("../services/tokyvideoService");
 
 const router = express.Router();
 
