@@ -1,13 +1,8 @@
-const express = require("express");
 
-const {
-  streamVideo,
-} = require(
-  "../services/tokyvideoService"
-);
+// routes/stream.js
+const router = require("express").Router();
+const { stream } = require("../controllers/streamController");
 
-const router = express.Router();
-
-router.get("/", streamVideo);
+router.get("/", stream);
 
 module.exports = router;

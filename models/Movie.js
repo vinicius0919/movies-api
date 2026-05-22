@@ -28,7 +28,17 @@ const movieSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    genres: [String]
+    genres: [String],
+    sources: [
+      {
+        provider: String,
+        url: String,
+        priority: Number,
+        active: Boolean,
+        lastCheckedAt: Date,
+        status: String,
+      },
+    ]
   },
   {
     timestamps: true,
