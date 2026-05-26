@@ -4,6 +4,7 @@ const Movie = require("../models/Movie");
 const { normalizeGenres, getMainGenre } = require("./genreMapper");
 const streamRouter = require("./streamRouter");
 // Adiciona no topo
+const tmdbService = require("./tmdbService")
 const youtubeProvider = require("../providers/YoutubeProvider");
 
 class MovieService {
@@ -62,17 +63,95 @@ class MovieService {
 
         return obj;
     }
-
     async create(data) {
-        if (!data.title) throw Object.assign(new Error("Título obrigatório"), { status: 400 });
-        if (!data.videoUrl) throw Object.assign(new Error("URL do vídeo obrigatória"), { status: 400 });
+        // if (!data.title)
+        //     throw Object.assign(
+        //         new Error("Título obrigatório"),
+        //         { status: 400 }
+        //     );
+
+        console.log(data)
+    
+        if (!data.videoUrl)
+            throw Object.assign(
+                new Error("URL do vídeo obrigatória"),
+                { status: 400 }
+            );
+    
         if (!streamRouter.isValidUrl(data.videoUrl))
-            throw Object.assign(new Error("URL inválida ou provider não suportado"), { status: 400 });
+            throw Object.assign(
+                new Error(
+                    "URL inválida ou provider não suportado"
+                ),
+                { status: 400 }
+            );
+    
+        const exists =
+            await Movie.findOne({
+                tmdbId: data.tmdbId,
+            });
+    
+        if (exists)
+            throw Object.assign(
+                new Error(
+                    "Filme já cadastrado"
+                ),
+                { status: 400 }
+            );
+    
+        /* =========================================
+           TMDB ENRICHMENT
+        ========================================= */
+    
+        if (data.tmdbId) {
+            try {
+                const tmdbMovie =
+                    await tmdbService.getMovieDetails(
+                        data.tmdbId
+                    );
 
-        const exists = await Movie.findOne({ tmdbId: data.tmdbId });
-        if (exists) throw Object.assign(new Error("Filme já cadastrado"), { status: 400 });
-
-        this._applyGenres(data, data.genres || []);
+                console.log(tmdbMovie)
+                data.title = tmdbMovie.title || tmdbMovie.original_title
+                data.genres =
+                    tmdbMovie.genres?.map(
+                        (genre) => genre.name
+                    ) || [];
+    
+                data.poster =
+                    tmdbMovie.poster_path
+                        ? `https://image.tmdb.org/t/p/w500${tmdbMovie.poster_path}`
+                        : data.poster;
+    
+                data.backdrop =
+                    tmdbMovie.backdrop_path
+                        ? `https://image.tmdb.org/t/p/original${tmdbMovie.backdrop_path}`
+                        : data.backdrop;
+    
+                data.overview =
+                    tmdbMovie.overview ||
+                    data.overview;
+    
+                data.year =
+                    tmdbMovie.release_date?.split(
+                        "-"
+                    )[0] || data.year;
+            } catch (error) {
+                console.error(
+                    "TMDB enrichment error:",
+                    error.message
+                );
+            }
+        }
+    
+        /* =========================================
+           GENRES
+        ========================================= */
+    
+        this._applyGenres(
+            data,
+            data.genres || []
+        );
+    
         return Movie.create(data);
     }
 

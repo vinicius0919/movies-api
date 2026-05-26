@@ -1,5 +1,9 @@
 // controllers/movieController.js
 
+const Movie = require("../models/Movie");
+
+const GENRE_ROWS = require("../config/genres.js");
+
 const movieService = require("../services/movieService");
 const tmdbService = require("../services/tmdbService");
 
@@ -24,6 +28,79 @@ const getById = async (req, res) => {
   } catch (err) { handleError(res, err); }
 };
 
+const getHome = async (req, res) => {
+  try {
+    /* =========================================
+       FEATURED
+    ========================================= */
+
+    const featured =
+      await Movie.aggregate([
+        {
+          $sample: {
+            size: 20,
+          },
+        },
+      ]);
+
+    /* =========================================
+       ROWS
+    ========================================= */
+
+    const rows =
+      await Promise.all(
+        GENRE_ROWS.map(
+          async (genre) => {
+            const movies =
+              await Movie.aggregate([
+                {
+                  $match: {
+                    genres: genre,
+                  },
+                },
+
+                {
+                  $sample: {
+                    size: 20,
+                  },
+                },
+              ]);
+
+            return {
+              id: genre,
+              title: genre,
+              movies,
+            };
+          }
+        )
+      );
+
+    /* =========================================
+       REMOVE EMPTY ROWS
+    ========================================= */
+
+    const validRows =
+      rows.filter(
+        (row) =>
+          row.movies.length > 0
+      );
+
+    return res.json({
+      featured,
+      rows: validRows,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res
+      .status(500)
+      .json({
+        error:
+          "Erro ao carregar home",
+      });
+  }
+}
+
 const create = async (req, res) => {
   try {
     const movie = await movieService.create(req.body);
@@ -38,6 +115,48 @@ const update = async (req, res) => {
     res.json(movie);
   } catch (err) { handleError(res, err); }
 };
+
+const addView = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const movie =
+      await Movie.findByIdAndUpdate(
+        id,
+        {
+          $inc: {
+            views: 1,
+          },
+        },
+        {
+          returnDocument: "after"
+        }
+      );
+
+    if (!movie) {
+      return res
+        .status(404)
+        .json({
+          error:
+            "Filme não encontrado",
+        });
+    }
+
+    return res.json({
+      success: true,
+      views: movie.views,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res
+      .status(500)
+      .json({
+        error:
+          "Erro ao adicionar view",
+      });
+  }
+}
 
 const remove = async (req, res) => {
   try {
@@ -74,4 +193,4 @@ const refreshTmdb = async (req, res) => {
   } catch (err) { handleError(res, err); }
 };
 
-module.exports = { list, getById, create, update, remove, toggleFavorite, listFavorites, refreshTmdb };
+module.exports = { list, getHome, addView, getById, create, update, remove, toggleFavorite, listFavorites, refreshTmdb };
