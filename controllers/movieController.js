@@ -30,12 +30,39 @@ const getById = async (req, res) => {
 
 const getHome = async (req, res) => {
   try {
+
+    const {
+      search,
+      genre,
+    } = req.query;
+
+    /* =========================================
+       FEATURED MATCH
+    ========================================= */
+
+    const featuredMatch = {};
+
+    if (search) {
+      featuredMatch.title = {
+        $regex: search,
+        $options: "i",
+      };
+    }
+
+    if (genre) {
+      featuredMatch.genres = genre;
+    }
+
     /* =========================================
        FEATURED
     ========================================= */
 
     const featured =
       await Movie.aggregate([
+        {
+          $match: featuredMatch,
+        },
+
         {
           $sample: {
             size: 20,
@@ -50,13 +77,50 @@ const getHome = async (req, res) => {
     const rows =
       await Promise.all(
         GENRE_ROWS.map(
-          async (genre) => {
+          async (genreRow) => {
+
+            /* ================================
+               MATCH
+            ================================= */
+
+            const match = {
+              genres: genreRow,
+            };
+
+            /* ================================
+               SEARCH FILTER
+            ================================= */
+
+            if (search) {
+              match.title = {
+                $regex: search,
+                $options: "i",
+              };
+            }
+
+            /* ================================
+               GLOBAL GENRE FILTER
+            ================================= */
+
+            if (
+              genre &&
+              genre !== genreRow
+            ) {
+              return {
+                id: genreRow,
+                title: genreRow,
+                movies: [],
+              };
+            }
+
+            /* ================================
+               QUERY
+            ================================= */
+
             const movies =
               await Movie.aggregate([
                 {
-                  $match: {
-                    genres: genre,
-                  },
+                  $match: match,
                 },
 
                 {
@@ -67,8 +131,8 @@ const getHome = async (req, res) => {
               ]);
 
             return {
-              id: genre,
-              title: genre,
+              id: genreRow,
+              title: genreRow,
               movies,
             };
           }
@@ -89,6 +153,7 @@ const getHome = async (req, res) => {
       featured,
       rows: validRows,
     });
+
   } catch (error) {
     console.error(error);
 
@@ -99,7 +164,7 @@ const getHome = async (req, res) => {
           "Erro ao carregar home",
       });
   }
-}
+};
 
 const create = async (req, res) => {
   try {
