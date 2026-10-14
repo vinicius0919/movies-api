@@ -1,8 +1,6 @@
-const express =
-  require("express");
+const express = require("express");
 
-const router =
-  express.Router();
+const router = express.Router();
 
 const {
   getSeries,
@@ -10,85 +8,126 @@ const {
   createSeries,
   updateSeries,
   deleteSeries,
+
+  addSeason,
+  updateSeason,
+  deleteSeason,
+
   addEpisode,
   updateEpisode,
   deleteEpisode,
+
   getHomeSeries,
+
   addSeriesView,
   addEpisodeView,
-} = require(
-  "../controllers/seriesController"
-);
 
-/* =========================================
-   HOME
-========================================= */
+  toggleFavorite,
+  listFavorites,
+} = require("../controllers/seriesController");
 
-router.get(
-  "/home",
-  getHomeSeries
-);
+// =========================================
+// AUTH MIDDLEWARES
+// =========================================
 
-/* =========================================
-   SERIES
-========================================= */
+// Ajuste este import para o caminho e a exportação
+// do middleware de autenticação existente no projeto.
+const authenticate = require("../middlewares/authenticate");
 
-router.get(
-  "/",
-  getSeries
-);
+// Somente administradores podem alterar o catálogo.
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      error: "Acesso restrito a administradores",
+    });
+  }
 
-router.get(
-  "/:id",
-  getSeriesById
-);
+  next();
+};
 
-router.post(
-  "/",
-  createSeries
-);
+// =========================================
+// HOME
+// =========================================
+
+router.get("/home", getHomeSeries);
+
+// =========================================
+// FAVORITES
+// =========================================
+
+// IMPORTANTE:
+// Rotas específicas antes de /:id.
+
+router.get("/favorites/list", authenticate, listFavorites);
+
+router.patch("/:id/favorite", authenticate, toggleFavorite);
+
+// =========================================
+// SERIES - READ
+// =========================================
+
+router.get("/", getSeries);
+
+router.get("/:id", getSeriesById);
+
+// =========================================
+// SERIES - ADMIN
+// =========================================
+
+router.post("/", authenticate, requireAdmin, createSeries);
+
+router.put("/:id", authenticate, requireAdmin, updateSeries);
+
+router.delete("/:id", authenticate, requireAdmin, deleteSeries);
+
+// =========================================
+// SEASONS - ADMIN
+// =========================================
+
+router.post("/:id/seasons", authenticate, requireAdmin, addSeason);
+
+router.put("/:id/seasons/:season", authenticate, requireAdmin, updateSeason);
+
+router.delete("/:id/seasons/:season", authenticate, requireAdmin, deleteSeason);
+
+// =========================================
+// EPISODES - ADMIN
+// =========================================
+
+// Mantém o endpoint antigo de cadastro,
+// inclusive a criação automática da temporada.
+
+router.post("/:id/episodes", authenticate, requireAdmin, addEpisode);
 
 router.put(
-  "/:id",
-  updateSeries
+  "/:id/seasons/:season/episodes/:episode",
+  authenticate,
+  requireAdmin,
+  updateEpisode,
 );
 
 router.delete(
-  "/:id",
-  deleteSeries
+  "/:id/seasons/:season/episodes/:episode",
+  authenticate,
+  requireAdmin,
+  deleteEpisode,
 );
 
-/* =========================================
-   VIEWS
-========================================= */
+// =========================================
+// VIEWS
+// =========================================
 
-router.post(
-  "/:id/view",
-  addSeriesView
-);
+// Contagem de acesso à página da série.
+router.post("/:id/view", authenticate, addSeriesView);
 
+// Contagem de reprodução do episódio.
+// O controle de assinatura deve ser aplicado
+// aqui se este endpoint fizer parte do fluxo
+// de reprodução protegida.
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
-  addEpisodeView
-);
-
-/* =========================================
-   EPISODES
-========================================= */
-
-router.post(
-  "/:id/episodes",
-  addEpisode
-);
-
-router.put(
-  "/:id/seasons/:season/episodes/:episode",
-  updateEpisode
-);
-
-router.delete(
-  "/:id/seasons/:season/episodes/:episode",
-  deleteEpisode
+  authenticate,
+  addEpisodeView,
 );
 
 module.exports = router;

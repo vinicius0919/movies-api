@@ -11,13 +11,30 @@ module.exports = async function authenticate(req, res, next) {
     });
   }
 
+  let payload;
+
   try {
-    const payload = jwt.verify(
+    payload = jwt.verify(
       token,
       process.env.JWT_SECRET,
       { algorithms: ["HS256"] }
     );
+  } catch {
+    return res.status(401).json({
+      error: "Sessão inválida ou expirada.",
+    });
+  }
 
+  if (
+    typeof payload.sub !== "string" ||
+    !payload.sub
+  ) {
+    return res.status(401).json({
+      error: "Sessão inválida.",
+    });
+  }
+
+  try {
     const user = await User.findById(payload.sub);
 
     if (!user) {
@@ -28,10 +45,8 @@ module.exports = async function authenticate(req, res, next) {
 
     req.user = user;
 
-    next();
-  } catch {
-    return res.status(401).json({
-      error: "Sessão inválida ou expirada.",
-    });
+    return next();
+  } catch (error) {
+    return next(error);
   }
 };

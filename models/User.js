@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -30,8 +29,32 @@ const userSchema = new mongoose.Schema(
       enum: ["user", "admin"],
       default: "user",
     },
+
+    favorites: {
+      movies: {
+        type: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Movie",
+          },
+        ],
+        default: [],
+      },
+
+      series: {
+        type: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Series",
+          },
+        ],
+        default: [],
+      },
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
 module.exports = mongoose.model("User", userSchema);
