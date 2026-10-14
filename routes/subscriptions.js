@@ -143,6 +143,52 @@ async function requestBilling(
   };
 }
 
+
+router.post(
+  "/confirm",
+  authenticate,
+  async (req, res, next) => {
+    try {
+      const userId =
+        getAuthenticatedUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: "Usuário não autenticado.",
+        });
+      }
+
+      const { subscriptionId } =
+        req.body || {};
+
+      if (
+        typeof subscriptionId !== "string" ||
+        !/^[a-f\d]{24}$/i.test(subscriptionId)
+      ) {
+        return res.status(400).json({
+          error:
+            "Identificador de assinatura inválido.",
+        });
+      }
+
+      const result = await requestBilling(
+        `/api/internal/subscriptions/${subscriptionId}/confirm`,
+        {
+          method: "POST",
+          body: {
+            userId,
+          },
+        }
+      );
+
+      return res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+
 // =============================================
 // TRATAMENTO DE ERROS
 // =============================================
