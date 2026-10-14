@@ -144,49 +144,7 @@ async function requestBilling(
 }
 
 
-router.post(
-  "/confirm",
-  authenticate,
-  async (req, res, next) => {
-    try {
-      const userId =
-        getAuthenticatedUserId(req);
 
-      if (!userId) {
-        return res.status(401).json({
-          error: "Usuário não autenticado.",
-        });
-      }
-
-      const { subscriptionId } =
-        req.body || {};
-
-      if (
-        typeof subscriptionId !== "string" ||
-        !/^[a-f\d]{24}$/i.test(subscriptionId)
-      ) {
-        return res.status(400).json({
-          error:
-            "Identificador de assinatura inválido.",
-        });
-      }
-
-      const result = await requestBilling(
-        `/api/internal/subscriptions/${subscriptionId}/confirm`,
-        {
-          method: "POST",
-          body: {
-            userId,
-          },
-        }
-      );
-
-      return res.json(result);
-    } catch (error) {
-      next(error);
-    }
-  }
-);
 
 
 // =============================================
@@ -451,5 +409,79 @@ router.post(
     }
   }
 );
+
+
+router.post(
+  "/confirm",
+  authenticate,
+  async (req, res) => {
+    try {
+      const userId =
+        getAuthenticatedUserId(req);
+
+      if (
+        !userId ||
+        !isValidObjectId(userId)
+      ) {
+        return res.status(401).json({
+          error:
+            "Sessão inválida. Faça login novamente.",
+        });
+      }
+
+      const { subscriptionId } =
+        req.body || {};
+
+      if (!isValidObjectId(subscriptionId)) {
+        return res.status(400).json({
+          error:
+            "Identificador de assinatura inválido.",
+        });
+      }
+
+      const { response, data } =
+        await requestBilling(
+          `/api/internal/subscriptions/${subscriptionId}/confirm`,
+          {
+            method: "POST",
+
+            body: JSON.stringify({
+              userId,
+            }),
+          }
+        );
+
+      if (!response.ok) {
+        console.error(
+          "[SUBSCRIPTIONS CONFIRM]",
+          response.status,
+          data.error
+        );
+
+        const status =
+          response.status === 404
+            ? 404
+            : response.status === 400
+              ? 400
+              : 502;
+
+        return res.status(status).json({
+          error:
+            data.error ||
+            "Não foi possível confirmar o pagamento.",
+        });
+      }
+
+      return res.json(data);
+    } catch (error) {
+      return handleBillingError(
+        error,
+        res,
+        "CONFIRM"
+      );
+    }
+  }
+);
+
 
 module.exports = router;
