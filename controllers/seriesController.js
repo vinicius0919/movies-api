@@ -16,7 +16,19 @@ const getUserId = (req) =>
   req.user?.id ||
   req.user?.userId;
 
+const isAdminUser = (req) =>
+  req.user?.role === "admin";
+
 const parseNumber = (value, min = 0) => {
+  if (
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    typeof value === "boolean"
+  ) {
+    return null;
+  }
+
   const number = Number(value);
 
   return Number.isInteger(number) && number >= min
@@ -47,7 +59,8 @@ const sendError = (res, error) => {
 
   if (error.name === "VersionError") {
     return res.status(409).json({
-      error: "O registro foi alterado. Atualize e tente novamente.",
+      error:
+        "O registro foi alterado. Atualize e tente novamente.",
     });
   }
 
@@ -67,6 +80,10 @@ const pickFields = (data, fields) => {
 
   return result;
 };
+
+// =========================================
+// FIELDS
+// =========================================
 
 const SERIES_FIELDS = [
   "tmdbId",
@@ -91,6 +108,34 @@ const EPISODE_FIELDS = [
   "sources",
 ];
 
+// Campos seguros para listagens.
+const CATALOG_FIELDS = [
+  "_id",
+  "tmdbId",
+  "title",
+  "overview",
+  "poster",
+  "backdrop",
+  "year",
+  "genres",
+  "views",
+  "status",
+  "published",
+  "totalSeasons",
+  "totalEpisodes",
+  "createdAt",
+];
+
+// Campos removidos dos detalhes
+// destinados aos assinantes.
+const PRIVATE_EPISODE_FIELDS =
+  "-seasons.episodes.videoUrl " +
+  "-seasons.episodes.sources";
+
+// =========================================
+// SERIES HELPERS
+// =========================================
+
 const findSeason = (series, number) =>
   series.seasons.find(
     (season) => season.seasonNumber === number
@@ -113,13 +158,22 @@ const recalculateTotals = (series) => {
   series.totalSeasons = series.seasons.length;
 
   series.totalEpisodes = series.seasons.reduce(
-    (total, season) => total + season.episodes.length,
+    (total, season) =>
+      total + season.episodes.length,
     0
   );
 };
 
+// Filtro de publicação.
+// Administradores podem acessar rascunhos
+// nos endpoints que utilizam este helper.
+const getVisibilityFilter = (req) =>
+  isAdminUser(req)
+    ? {}
+    : { published: true };
+
 // =========================================
-// GET ALL SERIES
+// GET ALL SERIES - ADMIN
 // =========================================
 
 async function getSeries(req, res) {
@@ -135,20 +189,52 @@ async function getSeries(req, res) {
 }
 
 // =========================================
+// GET SERIES CATALOG
+// =========================================
+
+async function getSeriesCatalog(req, res) {
+  try {
+    const series = await Series.find({
+      published: true,
+    })
+      .select(CATALOG_FIELDS.join(" "))
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json(series);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+// =========================================
 // GET SERIES BY ID
 // =========================================
 
 async function getSeriesById(req, res) {
   try {
-    if (!isValidId(req.params.id)) {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
       return res.status(400).json({
         error: "Identificador inválido",
       });
     }
 
-    const series = await Series.findById(
-      req.params.id
-    ).lean();
+    const admin = isAdminUser(req);
+
+    let query = Series.findOne({
+      _id: id,
+      ...getVisibilityFilter(req),
+    });
+
+    // if (!admin) {
+    //   query = query.select(
+    //     PRIVATE_EPISODE_FIELDS
+    //   );
+    // }
+
+    const series = await query.lean();
 
     if (!series) {
       return res.status(404).json({
@@ -163,7 +249,7 @@ async function getSeriesById(req, res) {
 }
 
 // =========================================
-// CREATE SERIES
+// CREATE SERIES - ADMIN
 // =========================================
 
 async function createSeries(req, res) {
@@ -182,9 +268,8 @@ async function createSeries(req, res) {
       });
     }
 
-    // Série criada sem temporadas.
-    // Temporadas e episódios possuem
-    // operações específicas de cadastro.
+    // Temporadas e episódios são gerenciados
+    // pelos endpoints específicos.
     const series = await Series.create({
       ...data,
       seasons: [],
@@ -200,7 +285,7 @@ async function createSeries(req, res) {
 }
 
 // =========================================
-// UPDATE SERIES
+// UPDATE SERIES - ADMIN
 // =========================================
 
 async function updateSeries(req, res) {
@@ -240,7 +325,7 @@ async function updateSeries(req, res) {
 }
 
 // =========================================
-// DELETE SERIES
+// DELETE SERIES - ADMIN
 // =========================================
 
 async function deleteSeries(req, res) {
@@ -261,7 +346,6 @@ async function deleteSeries(req, res) {
       });
     }
 
-    // Limpa referências nos favoritos.
     await User.updateMany(
       {},
       {
@@ -280,7 +364,7 @@ async function deleteSeries(req, res) {
 }
 
 // =========================================
-// ADD SEASON
+// ADD SEASON - ADMIN
 // =========================================
 
 async function addSeason(req, res) {
@@ -291,9 +375,13 @@ async function addSeason(req, res) {
       req.body?.seasonNumber
     );
 
-    if (!isValidId(id) || seasonNumber === null) {
+    if (
+      !isValidId(id) ||
+      seasonNumber === null
+    ) {
       return res.status(400).json({
-        error: "Identificador ou temporada inválida",
+        error:
+          "Identificador ou temporada inválida",
       });
     }
 
@@ -322,10 +410,12 @@ async function addSeason(req, res) {
     });
 
     series.seasons.sort(
-      (a, b) => a.seasonNumber - b.seasonNumber
+      (a, b) =>
+        a.seasonNumber - b.seasonNumber
     );
 
     recalculateTotals(series);
+
     await series.save();
 
     return res.status(201).json(series);
@@ -335,7 +425,7 @@ async function addSeason(req, res) {
 }
 
 // =========================================
-// UPDATE SEASON
+// UPDATE SEASON - ADMIN
 // =========================================
 
 async function updateSeason(req, res) {
@@ -346,9 +436,13 @@ async function updateSeason(req, res) {
       req.params.season
     );
 
-    if (!isValidId(id) || seasonNumber === null) {
+    if (
+      !isValidId(id) ||
+      seasonNumber === null
+    ) {
       return res.status(400).json({
-        error: "Identificador ou temporada inválida",
+        error:
+          "Identificador ou temporada inválida",
       });
     }
 
@@ -385,7 +479,7 @@ async function updateSeason(req, res) {
 }
 
 // =========================================
-// DELETE SEASON
+// DELETE SEASON - ADMIN
 // =========================================
 
 async function deleteSeason(req, res) {
@@ -396,9 +490,13 @@ async function deleteSeason(req, res) {
       req.params.season
     );
 
-    if (!isValidId(id) || seasonNumber === null) {
+    if (
+      !isValidId(id) ||
+      seasonNumber === null
+    ) {
       return res.status(400).json({
-        error: "Identificador ou temporada inválida",
+        error:
+          "Identificador ou temporada inválida",
       });
     }
 
@@ -421,8 +519,6 @@ async function deleteSeason(req, res) {
       });
     }
 
-    // Evita excluir acidentalmente
-    // uma temporada com episódios.
     if (
       season.episodes.length > 0 &&
       req.query.force !== "true"
@@ -439,6 +535,7 @@ async function deleteSeason(req, res) {
     );
 
     recalculateTotals(series);
+
     await series.save();
 
     return res.json({
@@ -450,7 +547,7 @@ async function deleteSeason(req, res) {
 }
 
 // =========================================
-// ADD EPISODE
+// ADD EPISODE - ADMIN
 // =========================================
 
 async function addEpisode(req, res) {
@@ -463,9 +560,13 @@ async function addEpisode(req, res) {
 
     const episodeData = req.body?.episode;
 
-    if (!isValidId(id) || seasonNumber === null) {
+    if (
+      !isValidId(id) ||
+      seasonNumber === null
+    ) {
       return res.status(400).json({
-        error: "Identificador ou temporada inválida",
+        error:
+          "Identificador ou temporada inválida",
       });
     }
 
@@ -475,7 +576,8 @@ async function addEpisode(req, res) {
       Array.isArray(episodeData)
     ) {
       return res.status(400).json({
-        error: "Dados do episódio obrigatórios",
+        error:
+          "Dados do episódio obrigatórios",
       });
     }
 
@@ -493,7 +595,7 @@ async function addEpisode(req, res) {
     );
 
     // Compatibilidade com o cadastro anterior:
-    // cria a temporada automaticamente.
+    // cria automaticamente a temporada.
     if (!season) {
       series.seasons.push({
         seasonNumber,
@@ -562,7 +664,7 @@ async function addEpisode(req, res) {
 }
 
 // =========================================
-// UPDATE EPISODE
+// UPDATE EPISODE - ADMIN
 // =========================================
 
 async function updateEpisode(req, res) {
@@ -631,7 +733,7 @@ async function updateEpisode(req, res) {
 }
 
 // =========================================
-// DELETE EPISODE
+// DELETE EPISODE - ADMIN
 // =========================================
 
 async function deleteEpisode(req, res) {
@@ -691,7 +793,7 @@ async function deleteEpisode(req, res) {
         item.episodeNumber !== episodeNumber
     );
 
-    // Não renumera os episódios restantes.
+    // Mantém a numeração dos demais episódios.
     recalculateTotals(series);
 
     await series.save();
@@ -721,8 +823,27 @@ async function getHomeSeries(req, res) {
       "Fantasia",
     ];
 
+    const projection = Object.fromEntries(
+      CATALOG_FIELDS.map((field) => [
+        field,
+        1,
+      ])
+    );
+
     const featured = await Series.aggregate([
-      { $sample: { size: 12 } },
+      {
+        $match: {
+          published: true,
+        },
+      },
+      {
+        $sample: {
+          size: 12,
+        },
+      },
+      {
+        $project: projection,
+      },
     ]);
 
     const rows = await Promise.all(
@@ -730,6 +851,7 @@ async function getHomeSeries(req, res) {
         const series = await Series.aggregate([
           {
             $match: {
+              published: true,
               genres: genre,
             },
           },
@@ -737,6 +859,9 @@ async function getHomeSeries(req, res) {
             $sample: {
               size: 20,
             },
+          },
+          {
+            $project: projection,
           },
         ]);
 
@@ -773,8 +898,11 @@ async function addSeriesView(req, res) {
       });
     }
 
-    const series = await Series.findByIdAndUpdate(
-      id,
+    const series = await Series.findOneAndUpdate(
+      {
+        _id: id,
+        ...getVisibilityFilter(req),
+      },
       {
         $inc: {
           views: 1,
@@ -782,6 +910,9 @@ async function addSeriesView(req, res) {
       },
       {
         new: true,
+        projection: {
+          views: 1,
+        },
       }
     );
 
@@ -829,6 +960,7 @@ async function addEpisodeView(req, res) {
     const series = await Series.findOneAndUpdate(
       {
         _id: id,
+        ...getVisibilityFilter(req),
         seasons: {
           $elemMatch: {
             seasonNumber,
@@ -861,7 +993,8 @@ async function addEpisodeView(req, res) {
 
     if (!series) {
       return res.status(404).json({
-        error: "Série ou episódio não encontrado",
+        error:
+          "Série ou episódio não encontrado",
       });
     }
 
@@ -906,9 +1039,10 @@ async function toggleFavorite(req, res) {
       });
     }
 
-    const series = await Series.findById(
-      seriesId
-    )
+    const series = await Series.findOne({
+      _id: seriesId,
+      ...getVisibilityFilter(req),
+    })
       .select("_id")
       .lean();
 
@@ -931,7 +1065,8 @@ async function toggleFavorite(req, res) {
     const isFavorite = (
       user.favorites?.series || []
     ).some(
-      (id) => String(id) === String(seriesId)
+      (id) =>
+        String(id) === String(seriesId)
     );
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -964,7 +1099,8 @@ async function toggleFavorite(req, res) {
     const favorite = (
       updatedUser.favorites?.series || []
     ).some(
-      (id) => String(id) === String(seriesId)
+      (id) =>
+        String(id) === String(seriesId)
     );
 
     return res.json({
@@ -1021,10 +1157,12 @@ async function listFavorites(req, res) {
       _id: {
         $in: favoriteIds,
       },
+      ...getVisibilityFilter(req),
     };
 
     const [series, total] = await Promise.all([
       Series.find(query)
+        .select(CATALOG_FIELDS.join(" "))
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -1045,25 +1183,101 @@ async function listFavorites(req, res) {
   }
 }
 
+async function getEpisodePlayback(req, res) {
+  try {
+    const { id, season, episode } = req.params;
+
+    const seasonNumber = parseNumber(season);
+    const episodeNumber = parseNumber(episode);
+
+    if (
+      !isValidId(id) ||
+      seasonNumber === null ||
+      episodeNumber === null
+    ) {
+      return res.status(400).json({
+        error: "Parâmetros inválidos",
+      });
+    }
+
+    const series = await Series.findOne({
+      _id: id,
+      ...getVisibilityFilter(req),
+    })
+      .select("seasons published")
+      .lean();
+
+    if (!series) {
+      return res.status(404).json({
+        error: "Série não encontrada",
+      });
+    }
+
+    const selectedSeason = series.seasons.find(
+      (item) => item.seasonNumber === seasonNumber
+    );
+
+    const selectedEpisode = selectedSeason?.episodes.find(
+      (item) => item.episodeNumber === episodeNumber
+    );
+
+    if (!selectedEpisode) {
+      return res.status(404).json({
+        error: "Episódio não encontrado",
+      });
+    }
+
+    const activeSource = [...(selectedEpisode.sources || [])]
+      .filter((source) => source.active && source.url)
+      .sort(
+        (a, b) =>
+          (a.priority ?? 0) - (b.priority ?? 0)
+      )[0];
+
+    const videoUrl =
+      activeSource?.url || selectedEpisode.videoUrl;
+
+    if (!videoUrl) {
+      return res.status(404).json({
+        error: "Nenhuma fonte de reprodução cadastrada",
+      });
+    }
+
+    return res.json({
+      videoUrl,
+    });
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
 // =========================================
 // EXPORTS
 // =========================================
 
 module.exports = {
   getSeries,
+  getSeriesCatalog,
   getSeriesById,
+  getEpisodePlayback,
+
   createSeries,
   updateSeries,
   deleteSeries,
+
   addSeason,
   updateSeason,
   deleteSeason,
+
   addEpisode,
   updateEpisode,
   deleteEpisode,
+
   getHomeSeries,
+
   addSeriesView,
   addEpisodeView,
+
   toggleFavorite,
   listFavorites,
 };

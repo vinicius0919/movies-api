@@ -18,12 +18,14 @@ const {
   deleteEpisode,
 
   getHomeSeries,
+  getSeriesCatalog,
 
   addSeriesView,
   addEpisodeView,
 
   toggleFavorite,
   listFavorites,
+  getEpisodePlayback,
 } = require("../controllers/seriesController");
 
 // =========================================
@@ -33,6 +35,10 @@ const {
 // Ajuste este import para o caminho e a exportação
 // do middleware de autenticação existente no projeto.
 const authenticate = require("../middlewares/authenticate");
+const {
+  getSeriesProgress,
+  saveSeriesProgress,
+} = require("../controllers/watchProgressController");
 
 // Somente administradores podem alterar o catálogo.
 const requireAdmin = (req, res, next) => {
@@ -50,6 +56,12 @@ const requireAdmin = (req, res, next) => {
 // =========================================
 
 router.get("/home", getHomeSeries);
+
+// =========================================
+// CATALOG
+// =========================================
+
+router.get("/catalog", getSeriesCatalog);
 
 // =========================================
 // FAVORITES
@@ -70,6 +82,14 @@ router.get("/", getSeries);
 
 router.get("/:id", getSeriesById);
 
+router.get(
+  "/:id/seasons/:season/episodes/:episode/playback",
+  authenticate,
+  getEpisodePlayback,
+);
+router.get("/:id/progress", authenticate, getSeriesProgress);
+
+router.put("/:id/progress", authenticate, saveSeriesProgress);
 // =========================================
 // SERIES - ADMIN
 // =========================================

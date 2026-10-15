@@ -1,4 +1,3 @@
-
 const mongoose = require("mongoose");
 
 const sourceSchema = new mongoose.Schema(
@@ -28,7 +27,7 @@ const sourceSchema = new mongoose.Schema(
       default: "unknown",
     },
   },
-  { _id: true }
+  { _id: true },
 );
 
 const episodeSchema = new mongoose.Schema(
@@ -72,7 +71,7 @@ const episodeSchema = new mongoose.Schema(
       default: [],
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const seasonSchema = new mongoose.Schema(
@@ -93,7 +92,7 @@ const seasonSchema = new mongoose.Schema(
       default: [],
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const seriesSchema = new mongoose.Schema(
@@ -127,17 +126,13 @@ const seriesSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: [
-        "ongoing",
-        "completed",
-        "cancelled",
-        "hiatus",
-      ],
+      enum: ["ongoing", "completed", "cancelled", "hiatus"],
       default: "ongoing",
     },
     published: {
       type: Boolean,
       default: false,
+      index: true,
     },
     totalSeasons: {
       type: Number,
@@ -154,7 +149,7 @@ const seriesSchema = new mongoose.Schema(
       default: [],
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Evita duplicações dentro de uma mesma série.
@@ -163,10 +158,7 @@ seriesSchema.pre("validate", function () {
 
   for (const season of this.seasons || []) {
     if (seasonNumbers.has(season.seasonNumber)) {
-      this.invalidate(
-        "seasons",
-        `Temporada ${season.seasonNumber} duplicada`
-      );
+      this.invalidate("seasons", `Temporada ${season.seasonNumber} duplicada`);
     }
 
     seasonNumbers.add(season.seasonNumber);
@@ -177,7 +169,7 @@ seriesSchema.pre("validate", function () {
       if (episodeNumbers.has(episode.episodeNumber)) {
         this.invalidate(
           "seasons",
-          `Episódio ${episode.episodeNumber} duplicado na temporada ${season.seasonNumber}`
+          `Episódio ${episode.episodeNumber} duplicado na temporada ${season.seasonNumber}`,
         );
       }
 
@@ -188,7 +180,7 @@ seriesSchema.pre("validate", function () {
   this.totalSeasons = this.seasons.length;
   this.totalEpisodes = this.seasons.reduce(
     (total, season) => total + season.episodes.length,
-    0
+    0,
   );
 });
 
@@ -199,7 +191,7 @@ seriesSchema.index(
     partialFilterExpression: {
       tmdbId: { $type: "number" },
     },
-  }
+  },
 );
 
 module.exports = mongoose.model("Series", seriesSchema);

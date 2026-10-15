@@ -4,6 +4,7 @@ const streamRouter = require("../services/streamRouter");
 
 async function stream(req, res) {
   const { page: pageUrl } = req.query;
+  console.log("[StreamController] Requisição de stream para:", pageUrl);
 
   if (!pageUrl) {
     return res.status(400).send("Parâmetro 'page' ausente");
