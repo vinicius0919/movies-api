@@ -1,81 +1,141 @@
-// services/streamRouter.js
 
-// services/streamRouter.js
-
-const tokyvideoProvider  = require("../providers/TokyvideoProvider");
+const tokyvideoProvider = require("../providers/TokyvideoProvider");
 const streamtapeProvider = require("../providers/StreamtapeProvider");
-const youtubeProvider    = require("../providers/YoutubeProvider"); // ← adiciona
+const youtubeProvider = require("../providers/YoutubeProvider");
 const VimeoProvider = require("../providers/VimeoProvider");
 const PeerTubeProvider = require("../providers/PeerTubeProvider");
 const ArchiveOrgProvider = require("../providers/ArchiveOrgProvider");
-/**
- * Ordem de preferência dos providers.
- * StreamRouter tenta cada um em sequência até um funcionar.
- * Para adicionar um novo provider: basta incluir aqui.
- */
 
 const PROVIDERS = [
-    youtubeProvider,      // detecção inequívoca
-    VimeoProvider,        // detecção inequívoca
-    PeerTubeProvider,     // detecção inequívoca
-    ArchiveOrgProvider,   // stream direto — antes dos outros genéricos
-    tokyvideoProvider,
-    streamtapeProvider,
-  ];
+  youtubeProvider,
+  VimeoProvider,
+  PeerTubeProvider,
+  ArchiveOrgProvider,
+  tokyvideoProvider,
+  streamtapeProvider,
+];
+
 class StreamRouter {
-  /**
-   * Retorna o provider adequado para a URL.
-   * Lança erro se nenhum provider reconhecer a URL.
-   */
   getProvider(url) {
-    const provider = PROVIDERS.find((p) => p.canHandle(url));
+    const provider = PROVIDERS.find(
+      (item) => item.canHandle(url)
+    );
+
     if (!provider) {
-      throw new Error(`Nenhum provider suporta a URL: ${url}`);
+      throw new Error(
+        `Nenhum provider suporta a URL: ${url}`
+      );
     }
+
     return provider;
   }
 
-  /**
-   * Valida se a URL é de algum provider suportado.
-   * Substitui o videoValidationService anterior.
-   */
   isValidUrl(url) {
+    if (
+      typeof url !== "string" ||
+      !url.trim()
+    ) {
+      return false;
+    }
+
     try {
-      return PROVIDERS.some((p) => p.canHandle(url));
+      const parsed = new URL(url);
+
+      if (
+        !["http:", "https:"].includes(
+          parsed.protocol
+        )
+      ) {
+        return false;
+      }
+
+      return PROVIDERS.some(
+        (provider) => provider.canHandle(url)
+      );
     } catch {
       return false;
     }
   }
 
-  /**
-   * Faz stream com fallback automático.
-   * Se o provider primário falhar, tenta os demais
-   * que também conseguem lidar com a URL.
-   */
   async streamWithFallback(url, req, res) {
-    const compatibleProviders = PROVIDERS.filter((p) => p.canHandle(url));
+    const compatibleProviders =
+      PROVIDERS.filter(
+        (provider) => provider.canHandle(url)
+      );
 
-    if (compatibleProviders.length === 0) {
-      throw new Error("Nenhum provider disponível para esta URL");
+    if (!compatibleProviders.length) {
+      throw new Error(
+        "Nenhum provider disponível"
+      );
     }
 
-    let lastError;
+    let lastError = null;
+
     for (const provider of compatibleProviders) {
+      if (
+        res.headersSent ||
+        res.destroyed ||
+        res.writableEnded
+      ) {
+        break;
+      }
+
+      const name =
+        provider.constructor?.name ||
+        "UnknownProvider";
+
       try {
-        await provider.stream(url, req, res);
-        return; // sucesso — encerra
-      } catch (err) {
-        lastError = err;
-        console.warn(
-          `[StreamRouter] Provider ${provider.constructor.name} falhou:`,
-          err.message
+        console.log(
+          `[StreamRouter] Executando ${name}`
         );
-        // Só continua se a resposta ainda não foi iniciada
-        if (res.headersSent) throw err;
+
+        await provider.stream(url, req, res);
+
+        // O provider pode retornar depois que
+        // o cliente cancelou a requisição.
+        if (
+          req.aborted ||
+          res.destroyed
+        ) {
+          return;
+        }
+
+        // Alguns providers podem gerenciar
+        // a resposta assincronamente.
+        // Não iniciamos outro provider depois
+        // de uma execução sem exceção.
+        return;
+      } catch (error) {
+        lastError = error;
+
+        console.error(
+          `[StreamRouter] Falha em ${name}`,
+          {
+            message: error.message,
+            code: error.code,
+            headersSent: res.headersSent,
+          }
+        );
+
+        // Não é possível trocar de provider
+        // após o envio dos headers.
+        if (
+          res.headersSent ||
+          res.destroyed ||
+          res.writableEnded ||
+          req.aborted
+        ) {
+          throw error;
+        }
       }
     }
 
-    throw lastError;
+    throw (
+      lastError ||
+      new Error(
+        "Todos os providers falharam"
+      )
+    );
   }
 }
 

@@ -5,13 +5,13 @@ const {
   stream,
 } = require("../controllers/streamController");
 
-
-
-const authenticate = require("../middlewares/authenticate");
-const requireSubscription = require("../middlewares/requireSubscription");
+const authenticate = require(
+  "../middlewares/authenticate"
+);
 
 router.get(
-  "/", authenticate,
+  "/",
+  authenticate,
   stream
 );
 

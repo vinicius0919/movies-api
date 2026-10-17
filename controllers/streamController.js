@@ -1,26 +1,69 @@
-// controllers/streamController.js
 
 const streamRouter = require("../services/streamRouter");
 
 async function stream(req, res) {
-  const { page: pageUrl } = req.query;
-  console.log("[StreamController] Requisição de stream para:", pageUrl);
+  const pageUrl = req.query.page;
 
-  if (!pageUrl) {
-    return res.status(400).send("Parâmetro 'page' ausente");
+  if (
+    typeof pageUrl !== "string" ||
+    !pageUrl.trim()
+  ) {
+    return res.status(400).send(
+      "Parâmetro 'page' inválido ou ausente"
+    );
   }
 
   if (!streamRouter.isValidUrl(pageUrl)) {
-    return res.status(400).send("URL de provider não suportado");
+    return res.status(400).send(
+      "URL de provider não suportado"
+    );
   }
 
-  try {
-    await streamRouter.streamWithFallback(pageUrl, req, res);
-  } catch (err) {
-    console.error("[StreamController] Erro no stream:", err.message);
-    if (!res.headersSent) {
-      res.status(502).send("Falha no streaming — todos os providers falharam");
+  const startedAt = Date.now();
+
+  console.log(
+    "[StreamController] Nova requisição",
+    {
+      pageUrl,
+      range: req.headers.range || null,
     }
+  );
+
+  try {
+    await streamRouter.streamWithFallback(
+      pageUrl,
+      req,
+      res
+    );
+  } catch (error) {
+    console.error(
+      "[StreamController] Falha",
+      {
+        message: error.message,
+        code: error.code,
+        elapsedMs:
+          Date.now() - startedAt,
+        headersSent: res.headersSent,
+      }
+    );
+
+    if (
+      res.destroyed ||
+      res.writableEnded
+    ) {
+      return;
+    }
+
+    if (!res.headersSent) {
+      return res.status(502).send(
+        "Não foi possível transmitir o vídeo"
+      );
+    }
+
+    // O status HTTP já foi enviado.
+    // Encerra a conexão para que o navegador
+    // possa detectar a falha.
+    res.destroy(error);
   }
 }
 
