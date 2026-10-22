@@ -26,6 +26,7 @@ const {
   toggleFavorite,
   listFavorites,
   getEpisodePlayback,
+  getAdminSeriesById,
 } = require("../controllers/seriesController");
 
 // =========================================
@@ -79,6 +80,17 @@ router.patch("/:id/favorite", authenticate, toggleFavorite);
 // =========================================
 
 router.get("/", getSeries);
+
+// =========================================
+// SERIES - ADMIN READ
+// =========================================
+
+router.get(
+  "/admin/:id",
+  authenticate,
+  requireAdmin,
+  getAdminSeriesById
+);
 
 router.get("/:id", getSeriesById);
 

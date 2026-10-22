@@ -1252,6 +1252,34 @@ async function getEpisodePlayback(req, res) {
 }
 
 // =========================================
+// GET SERIES BY ID - ADMIN
+// =========================================
+
+async function getAdminSeriesById(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        error: "Identificador inválido",
+      });
+    }
+
+    const series = await Series.findById(id).lean();
+
+    if (!series) {
+      return res.status(404).json({
+        error: "Série não encontrada",
+      });
+    }
+
+    return res.json(series);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+// =========================================
 // EXPORTS
 // =========================================
 
@@ -1260,6 +1288,7 @@ module.exports = {
   getSeriesCatalog,
   getSeriesById,
   getEpisodePlayback,
+  getAdminSeriesById,
 
   createSeries,
   updateSeries,
