@@ -5,6 +5,10 @@ const { pipeline } = require("node:stream/promises");
 const IStreamProvider = require("./IStreamProvider");
 const { extractMp4Url } = require("../utils/extractVideos");
 
+// ======================================================
+// CONFIGURAÇÕES
+// ======================================================
+
 const PAGE_TIMEOUT_MS = 15000;
 const CDN_CONNECTION_TIMEOUT_MS = 20000;
 const CDN_IDLE_TIMEOUT_MS = 45000;
@@ -13,6 +17,10 @@ const WATCHDOG_INTERVAL_MS = 5000;
 const USER_AGENT = "Mozilla/5.0";
 
 class TokyvideoProvider extends IStreamProvider {
+  // ====================================================
+  // IDENTIFICAÇÃO DO PROVIDER
+  // ====================================================
+
   canHandle(url) {
     try {
       const parsed = new URL(url);
@@ -29,38 +37,105 @@ class TokyvideoProvider extends IStreamProvider {
     }
   }
 
+  // ====================================================
+  // EXTRAÇÃO DA URL MP4
+  // ====================================================
+
   async extractMp4(html) {
     return extractMp4Url(html);
   }
+
+  // ====================================================
+  // TRANSMISSÃO
+  // ====================================================
 
   async stream(pageUrl, req, res) {
     const controller = new AbortController();
 
     let upstream = null;
     let watchdog = null;
+
     let clientDisconnected = false;
     let finished = false;
+
+    let upstreamFailure = null;
+    let upstreamPrematureClose = false;
+
     let transferredBytes = 0;
     let lastActivity = Date.now();
 
     const startedAt = Date.now();
 
-    const onClientClose = () => {
-      if (res.writableFinished) return;
+    const requestedRange = req.headers.range || null;
 
+    // ==================================================
+    // EVENTOS DA RESPOSTA HTTP
+    // ==================================================
+
+    const onResponseFinish = () => {
+      finished = true;
+    };
+
+    const onClientClose = () => {
+      // Resposta enviada integralmente.
+      if (res.writableFinished) {
+        return;
+      }
+
+      // Uma falha no upstream pode provocar
+      // o fechamento da resposta pelo pipeline.
+      if (upstreamFailure || upstreamPrematureClose) {
+        console.warn(
+          "[Tokyvideo] Resposta encerrada após falha no upstream",
+          {
+            transferredBytes,
+            elapsedMs: Date.now() - startedAt,
+            upstreamFailure:
+              upstreamFailure?.message || null,
+            upstreamPrematureClose,
+          }
+        );
+
+        // Cancela operações ainda pendentes.
+        if (!controller.signal.aborted) {
+          controller.abort();
+        }
+
+        return;
+      }
+
+      // Não é possível determinar apenas pelo
+      // evento close se foi uma ação do usuário.
       clientDisconnected = true;
-      controller.abort();
+
+      console.info(
+        "[Tokyvideo] Resposta interrompida antes da conclusão",
+        {
+          transferredBytes,
+          elapsedMs: Date.now() - startedAt,
+          range: requestedRange,
+        }
+      );
+
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
 
       if (upstream && !upstream.destroyed) {
         upstream.destroy();
       }
     };
 
+    res.once("finish", onResponseFinish);
     res.once("close", onClientClose);
 
     try {
+      // ==================================================
+      // 1. RESOLVER A PÁGINA DO TOKYVIDEO
+      // ==================================================
+
       console.log("[Tokyvideo] Resolvendo página", {
-        range: req.headers.range || null,
+        range: requestedRange,
       });
 
       const pageResponse = await axios.get(pageUrl, {
@@ -74,7 +149,13 @@ class TokyvideoProvider extends IStreamProvider {
         },
       });
 
-      if (clientDisconnected) return;
+      if (clientDisconnected || res.destroyed) {
+        return;
+      }
+
+      // ==================================================
+      // 2. EXTRAIR A URL DO ARQUIVO
+      // ==================================================
 
       const mp4Url = await this.extractMp4(
         pageResponse.data
@@ -93,8 +174,14 @@ class TokyvideoProvider extends IStreamProvider {
           parsedMp4Url.protocol
         )
       ) {
-        throw new Error("Protocolo de vídeo inválido");
+        throw new Error(
+          "Protocolo de vídeo inválido"
+        );
       }
+
+      // ==================================================
+      // 3. PREPARAR REQUISIÇÃO AO CDN
+      // ==================================================
 
       const requestHeaders = {
         "User-Agent": USER_AGENT,
@@ -104,28 +191,79 @@ class TokyvideoProvider extends IStreamProvider {
         "Accept-Encoding": "identity",
       };
 
-      if (req.headers.range) {
-        requestHeaders.Range = req.headers.range;
+      if (requestedRange) {
+        requestHeaders.Range = requestedRange;
       }
 
-      const response = await axios({
-        method: "GET",
-        url: mp4Url,
-        responseType: "stream",
-        decompress: false,
-        timeout: CDN_CONNECTION_TIMEOUT_MS,
-        signal: controller.signal,
-        maxRedirects: 5,
-        validateStatus: () => true,
-        headers: requestHeaders,
-      });
+      // ==================================================
+      // 4. CONECTAR AO CDN
+      // ==================================================
+
+      // Limita o tempo para receber a resposta
+      // inicial do CDN.
+      //
+      // Após a conexão, o watchdog assume o
+      // monitoramento da transmissão.
+
+      const connectionTimer = setTimeout(() => {
+        controller.abort(
+          new Error(
+            "Timeout ao conectar ao CDN"
+          )
+        );
+      }, CDN_CONNECTION_TIMEOUT_MS);
+
+      let response;
+
+      try {
+        response = await axios({
+          method: "GET",
+          url: mp4Url,
+          responseType: "stream",
+
+          // Preserva os bytes originais.
+          decompress: false,
+
+          // Desativa o timeout geral do Axios.
+          // O watchdog controla a inatividade.
+          timeout: 0,
+
+          signal: controller.signal,
+          maxRedirects: 5,
+          validateStatus: () => true,
+          headers: requestHeaders,
+        });
+      } finally {
+        clearTimeout(connectionTimer);
+      }
 
       upstream = response.data;
+
+      // ==================================================
+      // 5. MONITORAR FALHAS DO UPSTREAM
+      // ==================================================
+
+      upstream.once("error", (error) => {
+        upstreamFailure = error;
+      });
+
+      upstream.once("close", () => {
+        if (
+          !upstream.readableEnded &&
+          !clientDisconnected
+        ) {
+          upstreamPrematureClose = true;
+        }
+      });
 
       if (clientDisconnected || res.destroyed) {
         upstream.destroy();
         return;
       }
+
+      // ==================================================
+      // 6. VALIDAR RESPOSTA DO CDN
+      // ==================================================
 
       const status = response.status;
 
@@ -144,10 +282,9 @@ class TokyvideoProvider extends IStreamProvider {
         );
       }
 
-      // Se o navegador pediu um intervalo e o CDN
-      // respondeu 200, não podemos fingir que o
-      // intervalo foi respeitado.
-      if (req.headers.range && status !== 206) {
+      // O navegador solicitou um intervalo.
+      // O CDN precisa respeitar essa solicitação.
+      if (requestedRange && status !== 206) {
         throw new Error(
           "CDN ignorou a solicitação HTTP Range"
         );
@@ -158,12 +295,18 @@ class TokyvideoProvider extends IStreamProvider {
         "video/mp4";
 
       if (
-        contentType.toLowerCase().includes("text/html")
+        contentType
+          .toLowerCase()
+          .includes("text/html")
       ) {
         throw new Error(
           "CDN retornou HTML em vez de vídeo"
         );
       }
+
+      // ==================================================
+      // 7. PREPARAR CABEÇALHOS HTTP
+      // ==================================================
 
       const outgoingHeaders = {
         "Content-Type": contentType,
@@ -171,6 +314,8 @@ class TokyvideoProvider extends IStreamProvider {
         "X-Content-Type-Options": "nosniff",
       };
 
+      // Preserva os cabeçalhos necessários
+      // para seek e reprodução parcial.
       for (const header of [
         "content-length",
         "content-range",
@@ -184,53 +329,69 @@ class TokyvideoProvider extends IStreamProvider {
         }
       }
 
+      // ==================================================
+      // 8. CONTABILIZAR TRANSFERÊNCIA
+      // ==================================================
+
       upstream.on("data", (chunk) => {
         transferredBytes += chunk.length;
         lastActivity = Date.now();
       });
 
-      // Só considera o CDN paralisado quando o
-      // fluxo está ativo. Durante backpressure,
-      // o Node pode pausar a leitura legitimamente.
+      // ==================================================
+      // 9. WATCHDOG DE INATIVIDADE
+      // ==================================================
+
       watchdog = setInterval(() => {
         if (
           finished ||
           clientDisconnected ||
           res.destroyed ||
-          upstream.destroyed ||
-          upstream.isPaused()
+          upstream.destroyed
         ) {
+          return;
+        }
+
+        // Quando há backpressure, o Node pode
+        // pausar a leitura legitimamente.
+        if (upstream.isPaused()) {
           return;
         }
 
         const idleMs =
           Date.now() - lastActivity;
 
-        if (idleMs >= CDN_IDLE_TIMEOUT_MS) {
-          console.error(
-            "[Tokyvideo] CDN paralisado",
-            {
-              idleMs,
-              transferredBytes,
-              range: req.headers.range || null,
-            }
-          );
-
-          upstream.destroy(
-            new Error(
-              `CDN sem dados por ${idleMs}ms`
-            )
-          );
+        if (idleMs < CDN_IDLE_TIMEOUT_MS) {
+          return;
         }
+
+        console.error(
+          "[Tokyvideo] CDN paralisado",
+          {
+            idleMs,
+            transferredBytes,
+            range: requestedRange,
+          }
+        );
+
+        upstream.destroy(
+          new Error(
+            `CDN sem dados por ${idleMs}ms`
+          )
+        );
       }, WATCHDOG_INTERVAL_MS);
 
       watchdog.unref?.();
+
+      // ==================================================
+      // 10. INICIAR TRANSMISSÃO
+      // ==================================================
 
       console.log(
         "[Tokyvideo] Transmissão iniciada",
         {
           status,
-          range: req.headers.range || null,
+          range: requestedRange,
           contentRange:
             response.headers["content-range"] ||
             null,
@@ -240,51 +401,83 @@ class TokyvideoProvider extends IStreamProvider {
         }
       );
 
-      res.writeHead(status, outgoingHeaders);
+      res.writeHead(
+        status,
+        outgoingHeaders
+      );
 
-      // Aguarda a conclusão ou falha real.
+      // O pipeline controla o backpressure
+      // e propaga erros de transmissão.
       await pipeline(upstream, res);
 
       finished = true;
+
+      // ==================================================
+      // 11. TRANSMISSÃO CONCLUÍDA
+      // ==================================================
 
       console.log(
         "[Tokyvideo] Transmissão concluída",
         {
           transferredBytes,
-          elapsedMs: Date.now() - startedAt,
+          elapsedMs:
+            Date.now() - startedAt,
+          range: requestedRange,
         }
       );
     } catch (error) {
+      // ==================================================
+      // 12. TRATAMENTO DE ERROS
+      // ==================================================
+
+      // Interrupção da resposta ou cancelamento
+      // explícito da requisição pelo cliente.
       if (
         clientDisconnected ||
-        req.aborted ||
-        (
-          controller.signal.aborted &&
-          res.destroyed
-        )
+        req.aborted
       ) {
-        console.log(
-          "[Tokyvideo] Cliente desconectado"
-        );
         return;
       }
+
+      const errorMessage =
+        controller.signal.aborted &&
+        controller.signal.reason?.message
+          ? controller.signal.reason.message
+          : error.message;
 
       console.error(
         "[Tokyvideo] Erro no streaming",
         {
-          message: error.message,
-          code: error.code,
+          message: errorMessage,
+          code: error.code || null,
           transferredBytes,
-          elapsedMs: Date.now() - startedAt,
+          elapsedMs:
+            Date.now() - startedAt,
           headersSent: res.headersSent,
+          range: requestedRange,
+          upstreamPrematureClose,
+          upstreamFailure:
+            upstreamFailure?.message || null,
         }
       );
 
+      // Deixa o StreamController tratar
+      // a falha e a resposta HTTP, quando possível.
       throw error;
     } finally {
+      // ==================================================
+      // 13. LIMPEZA DE RECURSOS
+      // ==================================================
+
       if (watchdog) {
         clearInterval(watchdog);
+        watchdog = null;
       }
+
+      res.removeListener(
+        "finish",
+        onResponseFinish
+      );
 
       res.removeListener(
         "close",
