@@ -6,6 +6,10 @@ const {
   streamMovie,
 } = require("../controllers/streamController");
 
+const {
+  streamSeriesEpisode,
+} = require("../controllers/seriesPlaybackController");
+
 const authenticate = require(
   "../middlewares/authenticate"
 );
@@ -26,12 +30,23 @@ router.get(
 );
 
 // =========================================
+// SERIES STREAMING
+// =========================================
+
+router.get(
+  "/series/:id/seasons/:season/episodes/:episode",
+  authenticate,
+  requireActiveSubscription,
+  streamSeriesEpisode
+);
+
+// =========================================
 // LEGACY STREAMING
 // =========================================
 
-// Compatibilidade temporária.
-// Remover após migrar todos os players,
-// pois aceita uma URL fornecida pelo cliente.
+// Compatibilidade temporária com players antigos.
+// Esta rota recebe uma URL do cliente.
+// Deve ser removida após a migração completa.
 
 router.get(
   "/",

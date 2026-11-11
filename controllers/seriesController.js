@@ -81,6 +81,70 @@ const pickFields = (data, fields) => {
   return result;
 };
 
+
+function buildPlaybackResponse(videoUrl) {
+  if (typeof videoUrl !== "string" || !videoUrl.trim()) {
+    return null;
+  }
+
+  const source = videoUrl.trim();
+
+  // Endpoint interno de streaming já implementado.
+  if (/^\/api\/media\/[a-zA-Z0-9/_-]+\/stream$/.test(source)) {
+    return {
+      provider: "native",
+      streamPath: source,
+    };
+  }
+
+  let url;
+
+  try {
+    url = new URL(source);
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "https:") {
+    return null;
+  }
+
+  // YouTube: incorporação oficial.
+  const hostname = url.hostname.toLowerCase();
+  let youtubeId = null;
+
+  if (
+    hostname === "youtube.com" ||
+    hostname === "www.youtube.com" ||
+    hostname === "m.youtube.com"
+  ) {
+    if (url.pathname === "/watch") {
+      youtubeId = url.searchParams.get("v");
+    } else {
+      const match = url.pathname.match(
+        /^\/(?:embed|shorts)\/([a-zA-Z0-9_-]{11})$/
+      );
+      youtubeId = match?.[1];
+    }
+  } else if (hostname === "youtu.be") {
+    youtubeId = url.pathname.slice(1);
+  }
+
+  if (youtubeId && /^[a-zA-Z0-9_-]{11}$/.test(youtubeId)) {
+    return {
+      provider: "youtube",
+      embedUrl: `https://www.youtube.com/embed/${youtubeId}`,
+    };
+  }
+
+  // Páginas externas não são arquivos de mídia.
+  return {
+    provider: "external",
+    watchUrl: source,
+  };
+}
+
+
 // =========================================
 // FIELDS
 // =========================================
@@ -1238,10 +1302,17 @@ async function getEpisodePlayback(req, res) {
         error: "Nenhuma fonte de reprodução cadastrada",
       });
     }
+const playback = buildPlaybackResponse(videoUrl);
 
-    return res.json({
-      videoUrl,
-    });
+if (!playback) {
+  return res.status(422).json({
+    error: "Fonte de reprodução inválida.",
+  });
+}
+
+res.set("Cache-Control", "private, no-store");
+
+return res.json(playback);
   } catch (error) {
     return sendError(res, error);
   }

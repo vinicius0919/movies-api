@@ -27,17 +27,28 @@ const {
 
   toggleFavorite,
   listFavorites,
-  getEpisodePlayback,
 } = require("../controllers/seriesController");
 
-const authenticate = require("../middlewares/authenticate");
-const requireAdmin = require("../middlewares/requireAdmin");
+const {
+  getEpisodePlayback,
+} = require("../controllers/seriesPlaybackController");
+
+const authenticate = require(
+  "../middlewares/authenticate"
+);
+
+const requireAdmin = require(
+  "../middlewares/requireAdmin"
+);
 
 const {
   getSeriesProgress,
   saveSeriesProgress,
 } = require("../controllers/watchProgressController");
-const requireActiveSubscription = require("../middlewares/requireActiveSubscription");
+
+const requireActiveSubscription = require(
+  "../middlewares/requireActiveSubscription"
+);
 
 // =========================================
 // CATÁLOGO PÚBLICO
@@ -61,10 +72,6 @@ router.get(
 // LISTAGEM ADMINISTRATIVA
 // =========================================
 
-// Mantemos GET /series para compatibilidade
-// com o frontend administrativo existente,
-// mas agora exigindo permissões de admin.
-
 router.get(
   "/",
   authenticate,
@@ -87,21 +94,14 @@ router.get(
 // DETALHES PÚBLICOS
 // =========================================
 
-// O controller deve retornar somente séries
-// publicadas e ocultar fontes de reprodução.
+// Retorna somente séries publicadas.
+// As fontes privadas são ocultadas pelo controller.
 
 router.get("/:id", getSeriesById);
 
 // =========================================
-// REPRODUÇÃO
+// AUTORIZAÇÃO DE REPRODUÇÃO
 // =========================================
-
-// PENDENTE:
-// Adicionar verificação de assinatura
-// antes de disponibilizar a fonte de mídia.
-// Não alteramos esse fluxo sem revisar
-// o módulo de assinaturas.
-
 
 router.get(
   "/:id/seasons/:season/episodes/:episode/playback",
@@ -221,13 +221,11 @@ router.post(
   addSeriesView
 );
 
-
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
   authenticate,
   requireActiveSubscription,
   addEpisodeView
 );
-
 
 module.exports = router;
