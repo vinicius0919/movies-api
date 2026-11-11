@@ -37,7 +37,7 @@ const {
   getSeriesProgress,
   saveSeriesProgress,
 } = require("../controllers/watchProgressController");
-const requireSubscription = require("../middlewares/requireSubscription");
+const requireActiveSubscription = require("../middlewares/requireActiveSubscription");
 
 // =========================================
 // CATÁLOGO PÚBLICO
@@ -106,7 +106,7 @@ router.get("/:id", getSeriesById);
 router.get(
   "/:id/seasons/:season/episodes/:episode/playback",
   authenticate,
-  requireSubscription,
+  requireActiveSubscription,
   getEpisodePlayback
 );
 
@@ -225,7 +225,7 @@ router.post(
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
   authenticate,
-  requireSubscription,
+  requireActiveSubscription,
   addEpisodeView
 );
 

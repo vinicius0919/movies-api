@@ -3,7 +3,7 @@ const router = require("express").Router();
 const c = require("../controllers/movieController");
 const authenticate = require("../middlewares/authenticate");
 const requireAdmin = require("../middlewares/requireAdmin");
-const requireSubscription = require("../middlewares/requireSubscription");
+const requireActiveSubscription = require("../middlewares/requireActiveSubscription");
 
 // =============================================
 // CONSULTAS PÚBLICAS
@@ -27,7 +27,7 @@ router.get(
 router.get(
   "/:id/playback",
   authenticate,
-  requireSubscription,
+  requireActiveSubscription,
   c.getPlayback
 );
 
