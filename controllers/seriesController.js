@@ -211,6 +211,7 @@ async function getSeriesCatalog(req, res) {
 // GET SERIES BY ID
 // =========================================
 
+
 async function getSeriesById(req, res) {
   try {
     const { id } = req.params;
@@ -221,20 +222,14 @@ async function getSeriesById(req, res) {
       });
     }
 
-    const admin = isAdminUser(req);
-
-    let query = Series.findOne({
+    // Endpoint público:
+    // somente séries publicadas.
+    const series = await Series.findOne({
       _id: id,
-      ...getVisibilityFilter(req),
-    });
-
-    // if (!admin) {
-    //   query = query.select(
-    //     PRIVATE_EPISODE_FIELDS
-    //   );
-    // }
-
-    const series = await query.lean();
+      published: true,
+    })
+      .select(PRIVATE_EPISODE_FIELDS)
+      .lean();
 
     if (!series) {
       return res.status(404).json({
@@ -247,6 +242,7 @@ async function getSeriesById(req, res) {
     return sendError(res, error);
   }
 }
+
 
 // =========================================
 // CREATE SERIES - ADMIN

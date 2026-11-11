@@ -1,3 +1,4 @@
+
 const express = require("express");
 
 const router = express.Router();
@@ -5,6 +6,10 @@ const router = express.Router();
 const {
   getSeries,
   getSeriesById,
+  getAdminSeriesById,
+  getSeriesCatalog,
+  getHomeSeries,
+
   createSeries,
   updateSeries,
   deleteSeries,
@@ -17,72 +22,57 @@ const {
   updateEpisode,
   deleteEpisode,
 
-  getHomeSeries,
-  getSeriesCatalog,
-
   addSeriesView,
   addEpisodeView,
 
   toggleFavorite,
   listFavorites,
   getEpisodePlayback,
-  getAdminSeriesById,
 } = require("../controllers/seriesController");
 
-// =========================================
-// AUTH MIDDLEWARES
-// =========================================
-
-// Ajuste este import para o caminho e a exportação
-// do middleware de autenticação existente no projeto.
 const authenticate = require("../middlewares/authenticate");
+const requireAdmin = require("../middlewares/requireAdmin");
+
 const {
   getSeriesProgress,
   saveSeriesProgress,
 } = require("../controllers/watchProgressController");
 
-// Somente administradores podem alterar o catálogo.
-const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== "admin") {
-    return res.status(403).json({
-      error: "Acesso restrito a administradores",
-    });
-  }
-
-  next();
-};
-
 // =========================================
-// HOME
+// CATÁLOGO PÚBLICO
 // =========================================
 
 router.get("/home", getHomeSeries);
 
-// =========================================
-// CATALOG
-// =========================================
-
 router.get("/catalog", getSeriesCatalog);
 
 // =========================================
-// FAVORITES
+// FAVORITOS
 // =========================================
 
-// IMPORTANTE:
-// Rotas específicas antes de /:id.
-
-router.get("/favorites/list", authenticate, listFavorites);
-
-router.patch("/:id/favorite", authenticate, toggleFavorite);
-
-// =========================================
-// SERIES - READ
-// =========================================
-
-router.get("/", getSeries);
+router.get(
+  "/favorites/list",
+  authenticate,
+  listFavorites
+);
 
 // =========================================
-// SERIES - ADMIN READ
+// LISTAGEM ADMINISTRATIVA
+// =========================================
+
+// Mantemos GET /series para compatibilidade
+// com o frontend administrativo existente,
+// mas agora exigindo permissões de admin.
+
+router.get(
+  "/",
+  authenticate,
+  requireAdmin,
+  getSeries
+);
+
+// =========================================
+// DETALHES ADMINISTRATIVOS
 // =========================================
 
 router.get(
@@ -92,74 +82,146 @@ router.get(
   getAdminSeriesById
 );
 
+// =========================================
+// DETALHES PÚBLICOS
+// =========================================
+
+// O controller deve retornar somente séries
+// publicadas e ocultar fontes de reprodução.
+
 router.get("/:id", getSeriesById);
+
+// =========================================
+// REPRODUÇÃO
+// =========================================
+
+// PENDENTE:
+// Adicionar verificação de assinatura
+// antes de disponibilizar a fonte de mídia.
+// Não alteramos esse fluxo sem revisar
+// o módulo de assinaturas.
 
 router.get(
   "/:id/seasons/:season/episodes/:episode/playback",
   authenticate,
-  getEpisodePlayback,
+  getEpisodePlayback
 );
-router.get("/:id/progress", authenticate, getSeriesProgress);
-
-router.put("/:id/progress", authenticate, saveSeriesProgress);
-// =========================================
-// SERIES - ADMIN
-// =========================================
-
-router.post("/", authenticate, requireAdmin, createSeries);
-
-router.put("/:id", authenticate, requireAdmin, updateSeries);
-
-router.delete("/:id", authenticate, requireAdmin, deleteSeries);
 
 // =========================================
-// SEASONS - ADMIN
+// PROGRESSO
 // =========================================
 
-router.post("/:id/seasons", authenticate, requireAdmin, addSeason);
+router.get(
+  "/:id/progress",
+  authenticate,
+  getSeriesProgress
+);
 
-router.put("/:id/seasons/:season", authenticate, requireAdmin, updateSeason);
-
-router.delete("/:id/seasons/:season", authenticate, requireAdmin, deleteSeason);
+router.put(
+  "/:id/progress",
+  authenticate,
+  saveSeriesProgress
+);
 
 // =========================================
-// EPISODES - ADMIN
+// FAVORITAR SÉRIE
 // =========================================
 
-// Mantém o endpoint antigo de cadastro,
-// inclusive a criação automática da temporada.
+router.patch(
+  "/:id/favorite",
+  authenticate,
+  toggleFavorite
+);
 
-router.post("/:id/episodes", authenticate, requireAdmin, addEpisode);
+// =========================================
+// ADMIN - SÉRIES
+// =========================================
+
+router.post(
+  "/",
+  authenticate,
+  requireAdmin,
+  createSeries
+);
+
+router.put(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  updateSeries
+);
+
+router.delete(
+  "/:id",
+  authenticate,
+  requireAdmin,
+  deleteSeries
+);
+
+// =========================================
+// ADMIN - TEMPORADAS
+// =========================================
+
+router.post(
+  "/:id/seasons",
+  authenticate,
+  requireAdmin,
+  addSeason
+);
+
+router.put(
+  "/:id/seasons/:season",
+  authenticate,
+  requireAdmin,
+  updateSeason
+);
+
+router.delete(
+  "/:id/seasons/:season",
+  authenticate,
+  requireAdmin,
+  deleteSeason
+);
+
+// =========================================
+// ADMIN - EPISÓDIOS
+// =========================================
+
+router.post(
+  "/:id/episodes",
+  authenticate,
+  requireAdmin,
+  addEpisode
+);
 
 router.put(
   "/:id/seasons/:season/episodes/:episode",
   authenticate,
   requireAdmin,
-  updateEpisode,
+  updateEpisode
 );
 
 router.delete(
   "/:id/seasons/:season/episodes/:episode",
   authenticate,
   requireAdmin,
-  deleteEpisode,
+  deleteEpisode
 );
 
 // =========================================
-// VIEWS
+// VISUALIZAÇÕES
 // =========================================
 
-// Contagem de acesso à página da série.
-router.post("/:id/view", authenticate, addSeriesView);
+router.post(
+  "/:id/view",
+  authenticate,
+  addSeriesView
+);
 
-// Contagem de reprodução do episódio.
-// O controle de assinatura deve ser aplicado
-// aqui se este endpoint fizer parte do fluxo
-// de reprodução protegida.
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
   authenticate,
-  addEpisodeView,
+  addEpisodeView
 );
 
 module.exports = router;

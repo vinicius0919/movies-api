@@ -34,19 +34,62 @@ const getById = async (req, res) => {
   }
 };
 
+function escapeRegex(value) {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+}
+
 const getHome = async (req, res) => {
   try {
-    const { search, genre } = req.query;
+    const rawSearch = req.query.search;
+    const rawGenre = req.query.genre;
 
-    /* =========================================
-       FEATURED MATCH
-    ========================================= */
+    if (
+      (rawSearch !== undefined &&
+        typeof rawSearch !== "string") ||
+      (rawGenre !== undefined &&
+        typeof rawGenre !== "string")
+    ) {
+      return res.status(400).json({
+        error: "Filtros inválidos",
+      });
+    }
+
+    const search = (rawSearch || "").trim();
+    const genre = (rawGenre || "").trim();
+
+    if (
+      search.length > 100 ||
+      genre.length > 100
+    ) {
+      return res.status(400).json({
+        error: "Filtro muito longo",
+      });
+    }
+
+    // Campos permitidos na Home.
+    // Não retornar videoUrl nem sources.
+    const publicProjection = {
+      _id: 1,
+      tmdbId: 1,
+      title: 1,
+      overview: 1,
+      poster: 1,
+      backdrop: 1,
+      year: 1,
+      genres: 1,
+      favorite: 1,
+      views: 1,
+      createdAt: 1,
+    };
 
     const featuredMatch = {};
 
     if (search) {
       featuredMatch.title = {
-        $regex: search,
+        $regex: escapeRegex(search),
         $options: "i",
       };
     }
@@ -55,51 +98,14 @@ const getHome = async (req, res) => {
       featuredMatch.genres = genre;
     }
 
-    /* =========================================
-       FEATURED
-    ========================================= */
-
     const featured = await Movie.aggregate([
-      {
-        $match: featuredMatch,
-      },
-
-      {
-        $sample: {
-          size: 20,
-        },
-      },
+      { $match: featuredMatch },
+      { $sample: { size: 20 } },
+      { $project: publicProjection },
     ]);
-
-    /* =========================================
-       ROWS
-    ========================================= */
 
     const rows = await Promise.all(
       GENRE_ROWS.map(async (genreRow) => {
-        /* ================================
-               MATCH
-            ================================= */
-
-        const match = {
-          genres: genreRow,
-        };
-
-        /* ================================
-               SEARCH FILTER
-            ================================= */
-
-        if (search) {
-          match.title = {
-            $regex: search,
-            $options: "i",
-          };
-        }
-
-        /* ================================
-               GLOBAL GENRE FILTER
-            ================================= */
-
         if (genre && genre !== genreRow) {
           return {
             id: genreRow,
@@ -108,20 +114,21 @@ const getHome = async (req, res) => {
           };
         }
 
-        /* ================================
-               QUERY
-            ================================= */
+        const match = {
+          genres: genreRow,
+        };
+
+        if (search) {
+          match.title = {
+            $regex: escapeRegex(search),
+            $options: "i",
+          };
+        }
 
         const movies = await Movie.aggregate([
-          {
-            $match: match,
-          },
-
-          {
-            $sample: {
-              size: 20,
-            },
-          },
+          { $match: match },
+          { $sample: { size: 20 } },
+          { $project: publicProjection },
         ]);
 
         return {
@@ -129,27 +136,24 @@ const getHome = async (req, res) => {
           title: genreRow,
           movies,
         };
-      }),
+      })
     );
-
-    /* =========================================
-       REMOVE EMPTY ROWS
-    ========================================= */
-
-    const validRows = rows.filter((row) => row.movies.length > 0);
 
     return res.json({
       featured,
-      rows: validRows,
+      rows: rows.filter(
+        (row) => row.movies.length > 0
+      ),
     });
   } catch (error) {
-    console.error(error);
+    console.error("[MOVIES HOME ERROR]", error);
 
     return res.status(500).json({
       error: "Erro ao carregar home",
     });
   }
 };
+
 
 const create = async (req, res) => {
   try {

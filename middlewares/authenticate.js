@@ -1,8 +1,14 @@
 
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+
 const User = require("../models/User");
 
-module.exports = async function authenticate(req, res, next) {
+module.exports = async function authenticate(
+  req,
+  res,
+  next
+) {
   const token = req.cookies?.miqflix_session;
 
   if (!token) {
@@ -17,7 +23,9 @@ module.exports = async function authenticate(req, res, next) {
     payload = jwt.verify(
       token,
       process.env.JWT_SECRET,
-      { algorithms: ["HS256"] }
+      {
+        algorithms: ["HS256"],
+      }
     );
   } catch {
     return res.status(401).json({
@@ -25,9 +33,11 @@ module.exports = async function authenticate(req, res, next) {
     });
   }
 
+  const userId = payload?.sub;
+
   if (
-    typeof payload.sub !== "string" ||
-    !payload.sub
+    typeof userId !== "string" ||
+    !mongoose.isValidObjectId(userId)
   ) {
     return res.status(401).json({
       error: "Sessão inválida.",
@@ -35,7 +45,7 @@ module.exports = async function authenticate(req, res, next) {
   }
 
   try {
-    const user = await User.findById(payload.sub);
+    const user = await User.findById(userId);
 
     if (!user) {
       return res.status(401).json({
