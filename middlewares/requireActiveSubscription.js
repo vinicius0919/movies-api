@@ -5,18 +5,28 @@ const createSubscriptionMiddleware = require(
 
 const {
   checkSubscriptionAccess,
-} = require(
-  "../services/subscriptionAccessService"
-);
+} = require("../services/subscriptionAccess");
+
+// =========================================
+// CHECK USER SUBSCRIPTION
+// =========================================
 
 async function checkUserSubscription(userId) {
   const access = await checkSubscriptionAccess(
     userId
   );
 
+  // Apenas true libera o acesso.
   return access?.hasAccess === true;
 }
 
-module.exports = createSubscriptionMiddleware(
-  checkUserSubscription
-);
+// =========================================
+// INITIALIZE MIDDLEWARE
+// =========================================
+
+const requireActiveSubscription =
+  createSubscriptionMiddleware(
+    checkUserSubscription
+  );
+
+module.exports = requireActiveSubscription;

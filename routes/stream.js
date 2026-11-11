@@ -14,7 +14,10 @@ const requireActiveSubscription = require(
   "../middlewares/requireActiveSubscription"
 );
 
-// Nova rota: streaming por ID.
+// =========================================
+// MOVIE STREAMING
+// =========================================
+
 router.get(
   "/movies/:id",
   authenticate,
@@ -22,9 +25,14 @@ router.get(
   streamMovie
 );
 
-// Rota antiga: manter somente durante
-// a migração dos players.
-// Ela ainda aceita URLs do cliente.
+// =========================================
+// LEGACY STREAMING
+// =========================================
+
+// Compatibilidade temporária.
+// Remover após migrar todos os players,
+// pois aceita uma URL fornecida pelo cliente.
+
 router.get(
   "/",
   authenticate,
