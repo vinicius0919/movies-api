@@ -3,6 +3,7 @@ const router = require("express").Router();
 const c = require("../controllers/movieController");
 const authenticate = require("../middlewares/authenticate");
 const requireAdmin = require("../middlewares/requireAdmin");
+const requireSubscription = require("../middlewares/requireSubscription");
 
 // =============================================
 // CONSULTAS PÚBLICAS
@@ -21,6 +22,13 @@ router.get(
   "/favorites/list",
   authenticate,
   c.listFavorites
+);
+
+router.get(
+  "/:id/playback",
+  authenticate,
+  requireSubscription,
+  c.getPlayback
 );
 
 // Adiciona ou remove um filme dos favoritos

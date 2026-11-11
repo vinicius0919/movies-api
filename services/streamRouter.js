@@ -85,9 +85,7 @@ class StreamRouter {
         "UnknownProvider";
 
       try {
-        console.log(
-          `[StreamRouter] Executando ${name}`
-        );
+
 
         await provider.stream(url, req, res);
 

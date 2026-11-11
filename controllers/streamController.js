@@ -1,9 +1,54 @@
-
 const streamRouter = require("../services/streamRouter");
+const mongoose = require("mongoose");
+const Movie = require("../models/Movie");
 
 // =========================================
 // STREAM CONTROLLER
 // =========================================
+
+async function streamMovie(req, res) {
+  const { id } = req.params;
+
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({
+      error: "Identificador do filme inválido.",
+    });
+  }
+
+  try {
+    const movie = await Movie.findById(id).select("videoUrl").lean();
+
+    if (!movie) {
+      return res.status(404).json({
+        error: "Filme não encontrado.",
+      });
+    }
+
+    if (!movie.videoUrl || !streamRouter.isValidUrl(movie.videoUrl)) {
+      return res.status(422).json({
+        error: "Fonte de reprodução indisponível.",
+      });
+    }
+
+    // A URL vem exclusivamente do banco.
+    // O cliente informa apenas o ID do filme.
+    await streamRouter.streamWithFallback(movie.videoUrl, req, res);
+  } catch (error) {
+    console.error("[STREAM MOVIE]", error.message);
+
+    if (res.destroyed || res.writableEnded || req.aborted) {
+      return;
+    }
+
+    if (res.headersSent) {
+      return res.destroy();
+    }
+
+    return res.status(502).json({
+      error: "Falha na transmissão do filme.",
+    });
+  }
+}
 
 async function stream(req, res) {
   const pageUrl = req.query.page;
@@ -12,97 +57,60 @@ async function stream(req, res) {
   // 1. VALIDAR PARÂMETROS
   // =======================================
 
-  if (
-    typeof pageUrl !== "string" ||
-    !pageUrl.trim()
-  ) {
+  if (typeof pageUrl !== "string" || !pageUrl.trim()) {
     return res
       .status(400)
       .type("text/plain")
-      .send(
-        "Parâmetro 'page' inválido ou ausente"
-      );
+      .send("Parâmetro 'page' inválido ou ausente");
   }
 
   if (!streamRouter.isValidUrl(pageUrl)) {
     return res
       .status(400)
       .type("text/plain")
-      .send(
-        "URL de provider não suportado"
-      );
+      .send("URL de provider não suportado");
   }
 
   const startedAt = Date.now();
-  const requestedRange =
-    req.headers.range || null;
+  const requestedRange = req.headers.range || null;
 
   // =======================================
   // 2. REGISTRAR REQUISIÇÃO
   // =======================================
-
-  console.log(
-    "[StreamController] Nova requisição",
-    {
-      range: requestedRange,
-      method: req.method,
-    }
-  );
 
   // =======================================
   // 3. INICIAR TRANSMISSÃO
   // =======================================
 
   try {
-    await streamRouter.streamWithFallback(
-      pageUrl,
-      req,
-      res
-    );
+    await streamRouter.streamWithFallback(pageUrl, req, res);
 
     // O provider pode retornar normalmente
     // após um cancelamento do navegador.
     if (res.destroyed && !res.writableFinished) {
-      console.info(
-        "[StreamController] Conexão encerrada",
-        {
-          elapsedMs: Date.now() - startedAt,
-          range: requestedRange,
-        }
-      );
+      console.info("[StreamController] Conexão encerrada", {
+        elapsedMs: Date.now() - startedAt,
+        range: requestedRange,
+      });
 
       return;
     }
-
-    console.log(
-      "[StreamController] Provider finalizado",
-      {
-        elapsedMs: Date.now() - startedAt,
-        range: requestedRange,
-        responseFinished: res.writableFinished,
-      }
-    );
   } catch (error) {
     // =====================================
     // 4. REGISTRAR ERRO
     // =====================================
 
-    const elapsedMs =
-      Date.now() - startedAt;
+    const elapsedMs = Date.now() - startedAt;
 
-    console.error(
-      "[StreamController] Falha no streaming",
-      {
-        message:
-          error?.message || "Erro desconhecido",
-        code: error?.code || null,
-        elapsedMs,
-        range: requestedRange,
-        headersSent: res.headersSent,
-        responseDestroyed: res.destroyed,
-        responseFinished: res.writableFinished,
-      }
-    );
+    console.error("[StreamController] Falha no streaming", {
+      message: error?.message || "Erro desconhecido",
+      code: error?.code || null,
+      elapsedMs,
+      range: requestedRange,
+      headersSent: res.headersSent,
+      responseDestroyed: res.destroyed,
+      responseFinished: res.writableFinished,
+    });
 
     // =====================================
     // 5. CONEXÃO JÁ ENCERRADA
@@ -114,11 +122,7 @@ async function stream(req, res) {
     // Nesse caso, não podemos escrever
     // novos cabeçalhos ou conteúdo.
 
-    if (
-      res.destroyed ||
-      res.writableEnded ||
-      req.aborted
-    ) {
+    if (res.destroyed || res.writableEnded || req.aborted) {
       return;
     }
 
@@ -133,9 +137,7 @@ async function stream(req, res) {
       return res
         .status(502)
         .type("text/plain")
-        .send(
-          "Não foi possível transmitir o vídeo"
-        );
+        .send("Não foi possível transmitir o vídeo");
     }
 
     // =====================================
@@ -149,13 +151,10 @@ async function stream(req, res) {
     // para que o navegador detecte a falha
     // e o useStreamRecovery possa reagir.
 
-    console.warn(
-      "[StreamController] Encerrando transmissão incompleta",
-      {
-        elapsedMs,
-        range: requestedRange,
-      }
-    );
+    console.warn("[StreamController] Encerrando transmissão incompleta", {
+      elapsedMs,
+      range: requestedRange,
+    });
 
     // O erro já foi registrado acima.
     // Não precisamos emitir outro evento
@@ -164,4 +163,4 @@ async function stream(req, res) {
   }
 }
 
-module.exports = { stream };
+module.exports = { stream, streamMovie };

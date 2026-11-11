@@ -134,9 +134,6 @@ class TokyvideoProvider extends IStreamProvider {
       // 1. RESOLVER A PÁGINA DO TOKYVIDEO
       // ==================================================
 
-      console.log("[Tokyvideo] Resolvendo página", {
-        range: requestedRange,
-      });
 
       const pageResponse = await axios.get(pageUrl, {
         timeout: PAGE_TIMEOUT_MS,
@@ -387,20 +384,6 @@ class TokyvideoProvider extends IStreamProvider {
       // 10. INICIAR TRANSMISSÃO
       // ==================================================
 
-      console.log(
-        "[Tokyvideo] Transmissão iniciada",
-        {
-          status,
-          range: requestedRange,
-          contentRange:
-            response.headers["content-range"] ||
-            null,
-          contentLength:
-            response.headers["content-length"] ||
-            null,
-        }
-      );
-
       res.writeHead(
         status,
         outgoingHeaders
@@ -416,15 +399,6 @@ class TokyvideoProvider extends IStreamProvider {
       // 11. TRANSMISSÃO CONCLUÍDA
       // ==================================================
 
-      console.log(
-        "[Tokyvideo] Transmissão concluída",
-        {
-          transferredBytes,
-          elapsedMs:
-            Date.now() - startedAt,
-          range: requestedRange,
-        }
-      );
     } catch (error) {
       // ==================================================
       // 12. TRATAMENTO DE ERROS

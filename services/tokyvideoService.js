@@ -66,10 +66,7 @@ async function streamVideo(req, res) {
         pageResponse.data
       );
 
-    console.log(
-      "MP4:",
-      videoUrl
-    );
+
 
     if (!videoUrl) {
       return res
@@ -119,10 +116,7 @@ async function streamVideo(req, res) {
           () => true,
       });
 
-    console.log(
-      "CDN STATUS:",
-      response.status
-    );
+
 
     if (
       response.status >= 400

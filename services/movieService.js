@@ -13,29 +13,85 @@ class MovieService {
         movie.mainGenre = getMainGenre(movie.genres);
     }
 
-    async list({ page = 1, limit = 20, search = "", genre = "" } = {}) {
-        const query = {};
-        if (search) query.title = { $regex: search, $options: "i" };
-        if (genre) query.genres = { $in: [genre] };
 
-        const skip = (page - 1) * limit;
+async list({
+  page = 1,
+  limit = 20,
+  search = "",
+  genre = "",
+} = {}) {
+  const currentPage = Math.max(
+    1,
+    Number.parseInt(page, 10) || 1
+  );
 
-        const [movies, total] = await Promise.all([
-            Movie.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
-            Movie.countDocuments(query),
-        ]);
+  const pageLimit = Math.min(
+    100,
+    Math.max(
+      1,
+      Number.parseInt(limit, 10) || 20
+    )
+  );
 
-        const totalPages = Math.ceil(total / limit);
+  if (
+    typeof search !== "string" ||
+    typeof genre !== "string" ||
+    search.length > 100 ||
+    genre.length > 100
+  ) {
+    throw Object.assign(
+      new Error("Filtros inválidos."),
+      { status: 400 }
+    );
+  }
 
-        return {
-            data: movies,
-            pagination: {
-                total, page, limit, totalPages,
-                hasNextPage: page < totalPages,
-                hasPrevPage: page > 1,
-            },
-        };
-    }
+  const query = {};
+
+  if (search.trim()) {
+    const escapedSearch = search
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    query.title = {
+      $regex: escapedSearch,
+      $options: "i",
+    };
+  }
+
+  if (genre.trim()) {
+    query.genres = genre.trim();
+  }
+
+  const skip = (currentPage - 1) * pageLimit;
+
+  const [movies, total] = await Promise.all([
+    Movie.find(query)
+      .select("-videoUrl -sources")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageLimit)
+      .lean(),
+
+    Movie.countDocuments(query),
+  ]);
+
+  const totalPages = Math.ceil(
+    total / pageLimit
+  );
+
+  return {
+    data: movies,
+    pagination: {
+      total,
+      page: currentPage,
+      limit: pageLimit,
+      totalPages,
+      hasNextPage: currentPage < totalPages,
+      hasPrevPage: currentPage > 1,
+    },
+  };
+}
+
 
     async findById(id) {
         const movie = await Movie.findById(id);
@@ -70,7 +126,6 @@ class MovieService {
         //         { status: 400 }
         //     );
 
-        console.log(data)
     
         if (!data.videoUrl)
             throw Object.assign(
@@ -110,7 +165,6 @@ class MovieService {
                         data.tmdbId
                     );
 
-                console.log(tmdbMovie)
                 data.title = tmdbMovie.title || tmdbMovie.original_title
                 data.genres =
                     tmdbMovie.genres?.map(

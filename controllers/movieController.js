@@ -9,6 +9,10 @@ const tmdbService = require("../services/tmdbService");
 const User = require("../models/User");
 const mongoose = require("mongoose");
 
+const streamRouter = require("../services/streamRouter");
+
+const youtubeProvider = require("../providers/YoutubeProvider");
+
 function handleError(res, err) {
   const status = err.status || 500;
   const message = err.message || "Erro interno";
@@ -26,19 +30,85 @@ const list = async (req, res) => {
 
 const getById = async (req, res) => {
   try {
-    const movie = await movieService.findById(req.params.id);
-    if (!movie) return res.status(404).json({ error: "Filme não encontrado" });
-    res.json(movie);
-  } catch (err) {
-    handleError(res, err);
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        error: "Identificador inválido",
+      });
+    }
+
+    const movie = await movieService.findById(id);
+
+    if (!movie) {
+      return res.status(404).json({
+        error: "Filme não encontrado",
+      });
+    }
+
+    const { videoUrl, sources, videoId, embedUrl, ...publicMovie } = movie;
+
+    return res.json(publicMovie);
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+// =========================================
+// PLAYBACK PROTEGIDO
+// =========================================
+
+const getPlayback = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        error: "Identificador inválido.",
+      });
+    }
+
+    const movie = await Movie.findById(id).select("videoUrl").lean();
+
+    if (!movie) {
+      return res.status(404).json({
+        error: "Filme não encontrado.",
+      });
+    }
+
+    if (!movie.videoUrl || !streamRouter.isValidUrl(movie.videoUrl)) {
+      return res.status(422).json({
+        error: "Fonte de reprodução indisponível.",
+      });
+    }
+
+    if (youtubeProvider.canHandle(movie.videoUrl)) {
+      const videoId = youtubeProvider.extractVideoId(movie.videoUrl);
+
+      if (typeof videoId !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+        return res.status(422).json({
+          error: "Vídeo do YouTube inválido.",
+        });
+      }
+
+      return res.json({
+        provider: "youtube",
+        embedUrl:
+          `https://www.youtube.com/embed/${videoId}` + "?autoplay=1&rel=0",
+      });
+    }
+
+    return res.json({
+      provider: "native",
+      streamPath: `/api/stream/movies/${id}`,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
 function escapeRegex(value) {
-  return value.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    "\\$&"
-  );
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 const getHome = async (req, res) => {
@@ -47,10 +117,8 @@ const getHome = async (req, res) => {
     const rawGenre = req.query.genre;
 
     if (
-      (rawSearch !== undefined &&
-        typeof rawSearch !== "string") ||
-      (rawGenre !== undefined &&
-        typeof rawGenre !== "string")
+      (rawSearch !== undefined && typeof rawSearch !== "string") ||
+      (rawGenre !== undefined && typeof rawGenre !== "string")
     ) {
       return res.status(400).json({
         error: "Filtros inválidos",
@@ -60,10 +128,7 @@ const getHome = async (req, res) => {
     const search = (rawSearch || "").trim();
     const genre = (rawGenre || "").trim();
 
-    if (
-      search.length > 100 ||
-      genre.length > 100
-    ) {
+    if (search.length > 100 || genre.length > 100) {
       return res.status(400).json({
         error: "Filtro muito longo",
       });
@@ -136,14 +201,12 @@ const getHome = async (req, res) => {
           title: genreRow,
           movies,
         };
-      })
+      }),
     );
 
     return res.json({
       featured,
-      rows: rows.filter(
-        (row) => row.movies.length > 0
-      ),
+      rows: rows.filter((row) => row.movies.length > 0),
     });
   } catch (error) {
     console.error("[MOVIES HOME ERROR]", error);
@@ -153,7 +216,6 @@ const getHome = async (req, res) => {
     });
   }
 };
-
 
 const create = async (req, res) => {
   try {
@@ -422,6 +484,7 @@ module.exports = {
   getHome,
   addView,
   getById,
+  getPlayback,
   create,
   update,
   remove,

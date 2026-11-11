@@ -101,9 +101,11 @@ router.get("/:id", getSeriesById);
 // Não alteramos esse fluxo sem revisar
 // o módulo de assinaturas.
 
+
 router.get(
   "/:id/seasons/:season/episodes/:episode/playback",
   authenticate,
+  requireSubscription,
   getEpisodePlayback
 );
 
@@ -218,10 +220,13 @@ router.post(
   addSeriesView
 );
 
+
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
   authenticate,
+  requireSubscription,
   addEpisodeView
 );
+
 
 module.exports = router;
