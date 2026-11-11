@@ -29,26 +29,16 @@ const {
   listFavorites,
 } = require("../controllers/seriesController");
 
-const {
-  getEpisodePlayback,
-} = require("../controllers/seriesPlaybackController");
+const { getEpisodePlayback } = require("../controllers/seriesPlaybackController");
 
-const authenticate = require(
-  "../middlewares/authenticate"
-);
-
-const requireAdmin = require(
-  "../middlewares/requireAdmin"
-);
+const authenticate = require("../middlewares/authenticate");
+const requireAdmin = require("../middlewares/requireAdmin");
 
 const {
   getSeriesProgress,
   saveSeriesProgress,
 } = require("../controllers/watchProgressController");
-
-const requireActiveSubscription = require(
-  "../middlewares/requireActiveSubscription"
-);
+const requireActiveSubscription = require("../middlewares/requireActiveSubscription");
 
 // =========================================
 // CATÁLOGO PÚBLICO
@@ -72,6 +62,10 @@ router.get(
 // LISTAGEM ADMINISTRATIVA
 // =========================================
 
+// Mantemos GET /series para compatibilidade
+// com o frontend administrativo existente,
+// mas agora exigindo permissões de admin.
+
 router.get(
   "/",
   authenticate,
@@ -94,13 +88,13 @@ router.get(
 // DETALHES PÚBLICOS
 // =========================================
 
-// Retorna somente séries publicadas.
-// As fontes privadas são ocultadas pelo controller.
+// O controller deve retornar somente séries
+// publicadas e ocultar fontes de reprodução.
 
 router.get("/:id", getSeriesById);
 
 // =========================================
-// AUTORIZAÇÃO DE REPRODUÇÃO
+// REPRODUÇÃO
 // =========================================
 
 router.get(
@@ -221,11 +215,13 @@ router.post(
   addSeriesView
 );
 
+
 router.post(
   "/:id/seasons/:season/episodes/:episode/view",
   authenticate,
   requireActiveSubscription,
   addEpisodeView
 );
+
 
 module.exports = router;

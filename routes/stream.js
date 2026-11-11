@@ -10,18 +10,10 @@ const {
   streamSeriesEpisode,
 } = require("../controllers/seriesPlaybackController");
 
-const authenticate = require(
-  "../middlewares/authenticate"
-);
+const authenticate = require("../middlewares/authenticate");
+const requireActiveSubscription = require("../middlewares/requireActiveSubscription");
 
-const requireActiveSubscription = require(
-  "../middlewares/requireActiveSubscription"
-);
-
-// =========================================
-// MOVIE STREAMING
-// =========================================
-
+// Filmes: mantém o endpoint existente.
 router.get(
   "/movies/:id",
   authenticate,
@@ -29,10 +21,7 @@ router.get(
   streamMovie
 );
 
-// =========================================
-// SERIES STREAMING
-// =========================================
-
+// Séries: mesma infraestrutura de streaming dos filmes.
 router.get(
   "/series/:id/seasons/:season/episodes/:episode",
   authenticate,
@@ -40,14 +29,8 @@ router.get(
   streamSeriesEpisode
 );
 
-// =========================================
-// LEGACY STREAMING
-// =========================================
-
-// Compatibilidade temporária com players antigos.
-// Esta rota recebe uma URL do cliente.
-// Deve ser removida após a migração completa.
-
+// Legado: manter apenas até migrar os consumidores antigos.
+// Recebe uma URL do cliente; revisar proteção contra SSRF antes de manter em produção.
 router.get(
   "/",
   authenticate,
