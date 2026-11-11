@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -13,7 +12,7 @@ const seriesRoutes = require("./routes/series");
 const tmdbRoutes = require("./routes/tmdb");
 const streamRoutes = require("./routes/stream");
 const subscriptionsRoutes = require("./routes/subscriptions");
-
+const collectionsRoutes =  require("./routes/collections")
 const app = express();
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -22,13 +21,8 @@ const PORT = Number(process.env.PORT) || 3001;
 // VALIDAÇÃO DAS VARIÁVEIS DE AMBIENTE
 // ============================================
 
-if (
-  !process.env.JWT_SECRET ||
-  process.env.JWT_SECRET.length < 32
-) {
-  throw new Error(
-    "Configure JWT_SECRET com pelo menos 32 caracteres."
-  );
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  throw new Error("Configure JWT_SECRET com pelo menos 32 caracteres.");
 }
 
 // ============================================
@@ -54,7 +48,7 @@ app.use(
       return callback(new Error("Origem não permitida pelo CORS"));
     },
     credentials: true,
-  })
+  }),
 );
 
 // ============================================
@@ -73,8 +67,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/movies", moviesRoutes);
 app.use("/api/series", seriesRoutes);
 app.use("/api/tmdb", tmdbRoutes);
+app.use("/api/collections", collectionsRoutes);
 app.use("/api/stream", streamRoutes);
-
 app.use("/api/subscriptions", subscriptionsRoutes);
 
 // ============================================
