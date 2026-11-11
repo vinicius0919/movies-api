@@ -170,6 +170,7 @@ function handleError(error, res, next) {
 // PUBLIC COLLECTION CONFIGURATIONS
 // ========================================
 
+
 exports.listPublic = async (req, res, next) => {
   try {
     const collections = await Collection.find({
@@ -181,9 +182,80 @@ exports.listPublic = async (req, res, next) => {
       .sort({ sortOrder: 1, title: 1 })
       .lean();
 
+    // Coleções manuais publicadas.
+    const manualCollections = collections.filter(
+      (collection) =>
+        collection.type === "manual" &&
+        collection.published === true
+    );
+
+    // Reunir todos os IDs sem duplicação.
+    const movieIds = new Set();
+    const seriesIds = new Set();
+
+    for (const collection of manualCollections) {
+      for (const item of collection.items || []) {
+        const id = String(item.mediaId);
+
+        if (item.mediaType === "movie") {
+          movieIds.add(id);
+        }
+
+        if (item.mediaType === "series") {
+          seriesIds.add(id);
+        }
+      }
+    }
+
+    // Buscar diretamente no MongoDB.
+    // Apenas campos seguros para o catálogo público.
+    const [movies, series] = await Promise.all([
+      Movie.find({
+        _id: { $in: [...movieIds] },
+        published: { $ne: false },
+      })
+        .select(
+          "_id title poster backdrop year releaseDate " +
+          "genres overview description rating published"
+        )
+        .lean(),
+
+      Series.find({
+        _id: { $in: [...seriesIds] },
+        published: { $ne: false },
+      })
+        .select(
+          "_id title poster backdrop year releaseDate " +
+          "genres overview description rating published"
+        )
+        .lean(),
+    ]);
+
+    // Índice para recuperar os títulos rapidamente.
+    const mediaIndex = new Map();
+
+    for (const movie of movies) {
+      mediaIndex.set(
+        `movie:${movie._id}`,
+        {
+          ...movie,
+          mediaType: "movie",
+        }
+      );
+    }
+
+    for (const item of series) {
+      mediaIndex.set(
+        `series:${item._id}`,
+        {
+          ...item,
+          mediaType: "series",
+        }
+      );
+    }
+
     const result = collections.map((collection) => {
-      // Uma coleção de gênero oculta precisa
-      // informar ao frontend que deve desaparecer.
+      // Coleção automática ocultada pelo admin.
       if (!collection.published) {
         return {
           id: collection.id,
@@ -192,25 +264,48 @@ exports.listPublic = async (req, res, next) => {
         };
       }
 
-      return {
+      const base = {
         id: collection.id,
         type: collection.type,
         title: collection.title,
         description: collection.description,
         coverUrl: collection.coverUrl,
         genre: collection.genre,
-        items: collection.items,
         published: true,
         featured: collection.featured,
         sortOrder: collection.sortOrder,
       };
+
+      if (collection.type === "manual") {
+        // Preservar a ordem definida pelo administrador.
+        const resolvedItems = (
+          collection.items || []
+        )
+          .map((reference) => {
+            const key =
+              `${reference.mediaType}:${reference.mediaId}`;
+
+            return mediaIndex.get(key);
+          })
+          .filter(Boolean);
+
+        return {
+          ...base,
+          resolvedItems,
+        };
+      }
+
+      return base;
     });
 
-    return res.json({ collections: result });
+    return res.json({
+      collections: result,
+    });
   } catch (error) {
     return next(error);
   }
 };
+
 
 // ========================================
 // ADMIN LIST
