@@ -37,6 +37,7 @@ const {
   getSeriesProgress,
   saveSeriesProgress,
 } = require("../controllers/watchProgressController");
+const requireSubscription = require("../middlewares/requireSubscription");
 
 // =========================================
 // CATÁLOGO PÚBLICO
