@@ -32,7 +32,12 @@ router.get(
   requireAdmin,
   controller.listAdmin
 );
-
+router.get(
+  "/admin/media",
+  authenticate,
+  requireAdmin,
+  controller.listAdminMedia
+);
 router.post(
   "/",
   authenticate,

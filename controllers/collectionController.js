@@ -2,6 +2,10 @@
 const mongoose = require("mongoose");
 const Collection = require("../models/Collection");
 
+
+const Movie = require("../models/Movie");
+const Series = require("../models/Series");
+
 class CollectionError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -223,6 +227,33 @@ exports.listAdmin = async (req, res, next) => {
     return next(error);
   }
 };
+
+
+// Catálogo completo para seleção administrativa
+exports.listAdminMedia = async (req, res, next) => {
+  try {
+    const [movies, series] = await Promise.all([
+      Movie.find({})
+        .select("_id title poster published")
+        .sort({ title: 1 })
+        .lean(),
+
+      Series.find({})
+        .select("_id title poster published")
+        .sort({ title: 1 })
+        .lean(),
+    ]);
+
+    return res.json({
+      movies,
+      series,
+      total: movies.length + series.length,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 
 // ========================================
 // CREATE MANUAL COLLECTION
