@@ -13,31 +13,24 @@ const requireAdmin = require(
   "../middlewares/requireAdmin"
 );
 
-// ========================================
-// PUBLIC
-// ========================================
+// Público
+router.get("/", controller.listPublic);
 
-router.get(
-  "/",
-  controller.listPublic
-);
-
-// ========================================
-// ADMIN
-// ========================================
-
+// Administração
 router.get(
   "/admin",
   authenticate,
   requireAdmin,
   controller.listAdmin
 );
+
 router.get(
   "/admin/media",
   authenticate,
   requireAdmin,
   controller.listAdminMedia
 );
+
 router.post(
   "/",
   authenticate,

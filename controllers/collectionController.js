@@ -1,17 +1,23 @@
 
 const mongoose = require("mongoose");
+
 const Collection = require("../models/Collection");
-
-
 const Movie = require("../models/Movie");
 const Series = require("../models/Series");
 
-class CollectionError extends Error {
-  constructor(message, status = 400) {
-    super(message);
-    this.status = status;
-  }
-}
+const PUBLIC_FIELDS = [
+  "_id",
+  "title",
+  "poster",
+  "backdrop",
+  "year",
+  "releaseDate",
+  "genres",
+  "overview",
+  "description",
+  "rating",
+  "published",
+].join(" ");
 
 function slugify(value) {
   return String(value || "")
@@ -22,102 +28,73 @@ function slugify(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-function validateItems(items) {
-  if (!Array.isArray(items) || items.length > 200) {
-    throw new CollectionError(
-      "Informe uma lista com até 200 títulos."
-    );
-  }
-
-  const seen = new Set();
-
-  return items.map((item) => {
-    const mediaType = item?.mediaType;
-    const mediaId = String(item?.mediaId || "");
-
-    if (
-      !["movie", "series"].includes(mediaType) ||
-      !mongoose.isValidObjectId(mediaId)
-    ) {
-      throw new CollectionError(
-        "A coleção contém um título inválido."
-      );
-    }
-
-    const key = `${mediaType}:${mediaId}`;
-
-    if (seen.has(key)) {
-      throw new CollectionError(
-        "A coleção contém títulos duplicados."
-      );
-    }
-
-    seen.add(key);
-
-    return { mediaType, mediaId };
-  });
+function badRequest(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
 }
 
 function normalizePayload(body = {}) {
   const data = {};
 
   if (Object.hasOwn(body, "title")) {
-    const title = String(body.title || "").trim();
-
-    if (!title || title.length > 120) {
-      throw new CollectionError("Título inválido.");
+    if (
+      typeof body.title !== "string" ||
+      !body.title.trim() ||
+      body.title.trim().length > 120
+    ) {
+      throw badRequest("Título inválido.");
     }
 
-    data.title = title;
+    data.title = body.title.trim();
   }
 
   if (Object.hasOwn(body, "description")) {
-    const description = String(
-      body.description ?? ""
-    ).trim();
-
-    if (description.length > 1000) {
-      throw new CollectionError(
-        "Descrição muito longa."
-      );
+    if (
+      typeof body.description !== "string" ||
+      body.description.length > 1000
+    ) {
+      throw badRequest("Descrição inválida.");
     }
 
-    data.description = description;
+    data.description = body.description.trim();
   }
 
   if (Object.hasOwn(body, "coverUrl")) {
-    const coverUrl = String(
-      body.coverUrl ?? ""
-    ).trim();
+    const value = body.coverUrl;
 
-    if (coverUrl) {
+    if (typeof value !== "string") {
+      throw badRequest("URL de capa inválida.");
+    }
+
+    const url = value.trim();
+
+    if (url) {
       try {
-        const url = new URL(coverUrl);
+        const parsed = new URL(url);
 
         if (
-          url.protocol !== "https:" ||
-          url.username ||
-          url.password ||
-          coverUrl.length > 2000
+          parsed.protocol !== "https:" ||
+          parsed.username ||
+          parsed.password ||
+          url.length > 2000
         ) {
-          throw new Error("URL inválida");
+          throw new Error("Invalid URL");
         }
       } catch {
-        throw new CollectionError(
-          "A imagem deve utilizar uma URL HTTPS válida."
+        throw badRequest(
+          "A capa deve utilizar uma URL HTTPS válida."
         );
       }
     }
 
-    data.coverUrl = coverUrl;
+    data.coverUrl = url;
   }
 
   for (const field of ["published", "featured"]) {
     if (Object.hasOwn(body, field)) {
       if (typeof body[field] !== "boolean") {
-        throw new CollectionError(
-          `${field} deve ser booleano.`
-        );
+        throw badRequest(`${field} deve ser booleano.`);
       }
 
       data[field] = body[field];
@@ -129,187 +106,181 @@ function normalizePayload(body = {}) {
       !Number.isInteger(body.sortOrder) ||
       Math.abs(body.sortOrder) > 10000
     ) {
-      throw new CollectionError(
-        "Ordem de exibição inválida."
-      );
+      throw badRequest("Ordem inválida.");
     }
 
     data.sortOrder = body.sortOrder;
   }
 
   if (Object.hasOwn(body, "items")) {
-    data.items = validateItems(body.items);
+    if (
+      !Array.isArray(body.items) ||
+      body.items.length > 200
+    ) {
+      throw badRequest(
+        "Informe até 200 títulos por coleção."
+      );
+    }
+
+    const seen = new Set();
+
+    data.items = body.items.map((item) => {
+      const mediaType = item?.mediaType;
+      const mediaId = String(item?.mediaId || "");
+
+      if (
+        !["movie", "series"].includes(mediaType) ||
+        !mongoose.isValidObjectId(mediaId)
+      ) {
+        throw badRequest(
+          "A coleção contém um título inválido."
+        );
+      }
+
+      const key = `${mediaType}:${mediaId}`;
+
+      if (seen.has(key)) {
+        throw badRequest(
+          "A coleção contém títulos duplicados."
+        );
+      }
+
+      seen.add(key);
+
+      return { mediaType, mediaId };
+    });
   }
 
   return data;
 }
 
-function handleError(error, res, next) {
-  if (error instanceof CollectionError) {
-    return res.status(error.status).json({
-      error: error.message,
-    });
-  }
+async function validateReferences(items) {
+  const movieIds = items
+    .filter((item) => item.mediaType === "movie")
+    .map((item) => item.mediaId);
 
-  if (error.code === 11000) {
-    return res.status(409).json({
-      error: "Já existe uma coleção com esse identificador.",
-    });
-  }
+  const seriesIds = items
+    .filter((item) => item.mediaType === "series")
+    .map((item) => item.mediaId);
 
-  if (error.name === "ValidationError") {
-    return res.status(400).json({
-      error: "Dados da coleção inválidos.",
-    });
-  }
+  const [movieCount, seriesCount] = await Promise.all([
+    Movie.countDocuments({
+      _id: { $in: movieIds },
+    }),
+    Series.countDocuments({
+      _id: { $in: seriesIds },
+    }),
+  ]);
 
-  return next(error);
+  if (
+    movieCount !== movieIds.length ||
+    seriesCount !== seriesIds.length
+  ) {
+    throw badRequest(
+      "Um ou mais títulos não existem no catálogo."
+    );
+  }
 }
 
-// ========================================
-// PUBLIC COLLECTION CONFIGURATIONS
-// ========================================
+function handleError(error, next) {
+  if (error.code === 11000) {
+    error.status = 409;
+    error.message =
+      "Já existe uma coleção com esse identificador.";
+  }
 
+  next(error);
+}
+
+// ======================================
+// PUBLIC
+// ======================================
 
 exports.listPublic = async (req, res, next) => {
   try {
     const collections = await Collection.find({
-      $or: [
-        { published: true },
-        { type: "genre", published: false },
-      ],
+      published: true,
     })
       .sort({ sortOrder: 1, title: 1 })
       .lean();
 
-    // Coleções manuais publicadas.
-    const manualCollections = collections.filter(
-      (collection) =>
-        collection.type === "manual" &&
-        collection.published === true
-    );
-
-    // Reunir todos os IDs sem duplicação.
     const movieIds = new Set();
     const seriesIds = new Set();
 
-    for (const collection of manualCollections) {
-      for (const item of collection.items || []) {
-        const id = String(item.mediaId);
+    for (const collection of collections) {
+      for (const reference of collection.items || []) {
+        const id = String(reference.mediaId);
 
-        if (item.mediaType === "movie") {
+        if (reference.mediaType === "movie") {
           movieIds.add(id);
-        }
-
-        if (item.mediaType === "series") {
+        } else if (reference.mediaType === "series") {
           seriesIds.add(id);
         }
       }
     }
 
-    // Buscar diretamente no MongoDB.
-    // Apenas campos seguros para o catálogo público.
     const [movies, series] = await Promise.all([
       Movie.find({
         _id: { $in: [...movieIds] },
         published: { $ne: false },
       })
-        .select(
-          "_id title poster backdrop year releaseDate " +
-          "genres overview description rating published"
-        )
+        .select(PUBLIC_FIELDS)
         .lean(),
 
       Series.find({
         _id: { $in: [...seriesIds] },
         published: { $ne: false },
       })
-        .select(
-          "_id title poster backdrop year releaseDate " +
-          "genres overview description rating published"
-        )
+        .select(PUBLIC_FIELDS)
         .lean(),
     ]);
 
-    // Índice para recuperar os títulos rapidamente.
     const mediaIndex = new Map();
 
     for (const movie of movies) {
-      mediaIndex.set(
-        `movie:${movie._id}`,
-        {
-          ...movie,
-          mediaType: "movie",
-        }
-      );
+      mediaIndex.set(`movie:${movie._id}`, {
+        ...movie,
+        mediaType: "movie",
+      });
     }
 
     for (const item of series) {
-      mediaIndex.set(
-        `series:${item._id}`,
-        {
-          ...item,
-          mediaType: "series",
-        }
-      );
+      mediaIndex.set(`series:${item._id}`, {
+        ...item,
+        mediaType: "series",
+      });
     }
 
     const result = collections.map((collection) => {
-      // Coleção automática ocultada pelo admin.
-      if (!collection.published) {
-        return {
-          id: collection.id,
-          type: "genre",
-          published: false,
-        };
-      }
+      const resolvedItems = (collection.items || [])
+        .map((reference) =>
+          mediaIndex.get(
+            `${reference.mediaType}:${reference.mediaId}`
+          )
+        )
+        .filter(Boolean);
 
-      const base = {
+      return {
         id: collection.id,
-        type: collection.type,
         title: collection.title,
         description: collection.description,
         coverUrl: collection.coverUrl,
-        genre: collection.genre,
-        published: true,
         featured: collection.featured,
         sortOrder: collection.sortOrder,
+        published: true,
+        resolvedItems,
       };
-
-      if (collection.type === "manual") {
-        // Preservar a ordem definida pelo administrador.
-        const resolvedItems = (
-          collection.items || []
-        )
-          .map((reference) => {
-            const key =
-              `${reference.mediaType}:${reference.mediaId}`;
-
-            return mediaIndex.get(key);
-          })
-          .filter(Boolean);
-
-        return {
-          ...base,
-          resolvedItems,
-        };
-      }
-
-      return base;
     });
 
-    return res.json({
-      collections: result,
-    });
+    return res.json({ collections: result });
   } catch (error) {
     return next(error);
   }
 };
 
-
-// ========================================
-// ADMIN LIST
-// ========================================
+// ======================================
+// ADMIN
+// ======================================
 
 exports.listAdmin = async (req, res, next) => {
   try {
@@ -323,8 +294,6 @@ exports.listAdmin = async (req, res, next) => {
   }
 };
 
-
-// Catálogo completo para seleção administrativa
 exports.listAdminMedia = async (req, res, next) => {
   try {
     const [movies, series] = await Promise.all([
@@ -339,125 +308,65 @@ exports.listAdminMedia = async (req, res, next) => {
         .lean(),
     ]);
 
-    return res.json({
-      movies,
-      series,
-      total: movies.length + series.length,
-    });
+    return res.json({ movies, series });
   } catch (error) {
     return next(error);
   }
 };
-
-
-// ========================================
-// CREATE MANUAL COLLECTION
-// ========================================
 
 exports.create = async (req, res, next) => {
   try {
     const data = normalizePayload(req.body);
 
     if (!data.title) {
-      throw new CollectionError(
-        "Informe o título da coleção."
-      );
+      throw badRequest("Informe o título.");
     }
 
     const slug = slugify(data.title);
 
     if (!slug) {
-      throw new CollectionError(
-        "Não foi possível gerar o identificador."
-      );
+      throw badRequest("Título inválido.");
     }
+
+    await validateReferences(data.items || []);
 
     const collection = await Collection.create({
       ...data,
       id: `custom-${slug}`,
-      type: "manual",
-      published: data.published ?? false,
     });
 
     return res.status(201).json(collection);
   } catch (error) {
-    return handleError(error, res, next);
+    return handleError(error, next);
   }
 };
 
-// ========================================
-// UPDATE OR CUSTOMIZE GENRE
-// ========================================
-
 exports.update = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const data = normalizePayload(req.body);
-
-    let collection = await Collection.findOne({ id });
+    const collection = await Collection.findOne({
+      id: req.params.id,
+    });
 
     if (!collection) {
-      // Permite personalizar um gênero que ainda
-      // existe apenas no catálogo automático.
-      if (!id.startsWith("genre-")) {
-        throw new CollectionError(
-          "Coleção não encontrada.",
-          404
-        );
-      }
-
-      const genre = String(
-        req.body.genre || ""
-      ).trim();
-
-      if (
-        !genre ||
-        genre.length > 100 ||
-        `genre-${slugify(genre)}` !== id
-      ) {
-        throw new CollectionError(
-          "Gênero inválido."
-        );
-      }
-
-      if (Object.hasOwn(data, "items")) {
-        throw new CollectionError(
-          "Coleções por gênero não aceitam títulos manuais."
-        );
-      }
-
-      collection = new Collection({
-        ...data,
-        id,
-        type: "genre",
-        genre,
-        title: data.title || genre,
-        published: data.published ?? true,
+      return res.status(404).json({
+        error: "Coleção não encontrada.",
       });
-    } else {
-      if (
-        collection.type === "genre" &&
-        Object.hasOwn(data, "items")
-      ) {
-        throw new CollectionError(
-          "Coleções por gênero não aceitam títulos manuais."
-        );
-      }
-
-      collection.set(data);
     }
 
+    const data = normalizePayload(req.body);
+
+    if (data.items) {
+      await validateReferences(data.items);
+    }
+
+    collection.set(data);
     await collection.save();
 
     return res.json(collection);
   } catch (error) {
-    return handleError(error, res, next);
+    return handleError(error, next);
   }
 };
-
-// ========================================
-// DELETE
-// ========================================
 
 exports.remove = async (req, res, next) => {
   try {
@@ -471,12 +380,7 @@ exports.remove = async (req, res, next) => {
       });
     }
 
-    // Para gêneros, excluir a personalização
-    // restaura a coleção automática original.
-    return res.json({
-      success: true,
-      restoredDefault: collection.type === "genre",
-    });
+    return res.json({ success: true });
   } catch (error) {
     return next(error);
   }

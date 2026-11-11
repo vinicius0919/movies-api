@@ -8,34 +8,22 @@ const collectionItemSchema = new mongoose.Schema(
       enum: ["movie", "series"],
       required: true,
     },
-
     mediaId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
     },
   },
-  {
-    _id: false,
-  }
+  { _id: false }
 );
 
 const collectionSchema = new mongoose.Schema(
   {
-    // IDs existentes: genre-acao, genre-comedia...
-    // IDs manuais: custom-especial-de-natal
     id: {
       type: String,
       required: true,
       unique: true,
       immutable: true,
-      match: /^(genre|custom)-[a-z0-9]+(?:-[a-z0-9]+)*$/,
-    },
-
-    type: {
-      type: String,
-      enum: ["genre", "manual"],
-      required: true,
-      immutable: true,
+      match: /^custom-[a-z0-9]+(?:-[a-z0-9]+)*$/,
     },
 
     title: {
@@ -56,19 +44,8 @@ const collectionSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
-      maxlength: 2000,
     },
 
-    // Gênero original de uma coleção automática.
-    genre: {
-      type: String,
-      default: "",
-      trim: true,
-      maxlength: 100,
-      immutable: true,
-    },
-
-    // Utilizado somente em coleções manuais.
     items: {
       type: [collectionItemSchema],
       default: [],
