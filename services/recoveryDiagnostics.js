@@ -10,7 +10,17 @@ function category(error) {
     case 18: return "database_authentication_failed";
     case "EAUTH": return "smtp_authentication_failed";
     case "ECONNECTION": case "ECONNREFUSED": return "connection_failed";
-    case "ETIMEDOUT": case "ESOCKET": return "connection_timeout_or_socket";
+    case "ETIMEDOUT":
+      // Nodemailer exposes a fixed timeoutType; never log its raw error/message.
+      switch (error?.timeoutType) {
+        case "CONNECT_TIMEOUT": return "smtp_connection_timeout";
+        case "UPGRADE_TIMEOUT": return "smtp_tls_timeout";
+        case "GREETING_TIMEOUT": return "smtp_greeting_timeout";
+        case "SOCKET_TIMEOUT": return "smtp_socket_timeout";
+        default: return "smtp_timeout";
+      }
+    case "ESOCKET": return "smtp_socket_error";
+    case "ETLS": return "smtp_tls_error";
   }
   switch (error?.name) {
     case "MongoServerError": return "database_server_error";

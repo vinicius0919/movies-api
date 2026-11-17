@@ -39,3 +39,38 @@ test("SMTP rejection rejects promise rather than claiming delivery", async () =>
   reject = true;
   await assert.rejects(sendResetEmail("person@example.com", "b".repeat(64)));
 });
+
+test("transport matches validated timeouts and preserves implicit TLS and required STARTTLS", async (t) => {
+  const nodemailer = require("nodemailer");
+  const original = { ...process.env };
+  const transports = [];
+  t.mock.method(nodemailer, "createTransport", (options) => {
+    transports.push(options);
+    return { async sendMail() { return { accepted: ["fixture@example.com"], rejected: [] }; } };
+  });
+  try {
+    process.env.NODE_ENV = "production";
+    process.env.SMTP_PORT = "465";
+    process.env.SMTP_SECURE = "true";
+    await sendResetEmail("fixture@example.com", "c".repeat(64));
+    assert.equal(transports[0].secure, true);
+    assert.equal(transports[0].requireTLS, false);
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_SECURE = "false";
+    await sendResetEmail("fixture@example.com", "d".repeat(64));
+    assert.equal(transports[1].secure, false);
+    assert.equal(transports[1].requireTLS, true);
+    for (const transport of transports) {
+      assert.equal(transport.connectionTimeout, 15000);
+      assert.equal(transport.greetingTimeout, 15000);
+      assert.equal(transport.socketTimeout, 20000);
+      assert.equal(transport.logger, false);
+      assert.equal(transport.debug, false);
+      assert.notEqual(transport.tls?.rejectUnauthorized, false);
+    }
+  } finally {
+    for (const key of ["NODE_ENV", "SMTP_PORT", "SMTP_SECURE"]) {
+      if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key];
+    }
+  }
+});

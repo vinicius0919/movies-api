@@ -36,6 +36,7 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
   "http://192.168.7.8:5173",
   "http://192.168.1.2:5173",
+  "https://endless-properly-unicorn.ngrok-free.app/",
   process.env.FRONTEND_URL,
 ]
   .filter(Boolean)

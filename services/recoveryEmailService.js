@@ -31,7 +31,9 @@ async function sendResetEmail(email, token) {
     secure: process.env.SMTP_SECURE === "true",
     requireTLS: process.env.NODE_ENV === "production" && process.env.SMTP_SECURE !== "true",
     auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-    connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 10000,
+    // Match the independently verified SMTP profile. A short HTTP response does not
+    // imply a short SMTP handshake or final message acknowledgement.
+    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
     logger: false, debug: false,
   });
   const result = await transport.sendMail({
