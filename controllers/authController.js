@@ -7,7 +7,7 @@ const COOKIE_NAME = "miqflix_session";
 
 function createToken(user) {
   return jwt.sign(
-    { sub: String(user._id) },
+    { sub: String(user._id), sv: user.sessionVersion || 0 },
     process.env.JWT_SECRET,
     {
       expiresIn: "7d",
@@ -117,7 +117,7 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({
       email: email.trim().toLowerCase(),
-    }).select("+passwordHash");
+    }).select("+passwordHash +sessionVersion");
 
     if (!user) {
       return res.status(401).json({

@@ -14,6 +14,8 @@ const streamRoutes = require("./routes/stream");
 const subscriptionsRoutes = require("./routes/subscriptions");
 const collectionsRoutes =  require("./routes/collections")
 const app = express();
+// Set exact trusted proxy IPs/CIDRs in deployment; never blindly trust client headers.
+if (process.env.TRUST_PROXY) app.set("trust proxy", process.env.TRUST_PROXY.split(",").map((value) => value.trim()));
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -33,6 +35,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://192.168.7.8:5173",
+  "http://192.168.1.2:5173",
   process.env.FRONTEND_URL,
 ]
   .filter(Boolean)
@@ -55,6 +58,10 @@ app.use(
 // MIDDLEWARES
 // ============================================
 
+app.use(["/api/auth/forgot-password", "/api/auth/reset-password"], (_req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
 
@@ -98,6 +105,12 @@ app.use((req, res) => {
 // ============================================
 
 app.use((error, req, res, next) => {
+  if (/^\/api\/auth\/(forgot-password|reset-password)(?:\/|$)/.test(req.path)) {
+    // Body parser errors may contain the raw body. Never log the error object here.
+    console.error("[PASSWORD RECOVERY] Request processing failed");
+    const status = error.message === "Origem não permitida pelo CORS" ? 403 : error.type === "entity.parse.failed" ? 400 : error.type === "entity.too.large" ? 413 : 500;
+    return res.status(status).json({ error: status === 500 ? "Erro interno do servidor" : "Dados da solicitação inválidos." });
+  }
   console.error("[MIQFLIX ERROR]", error);
 
   if (error.message === "Origem não permitida pelo CORS") {
@@ -123,7 +136,9 @@ async function start() {
   });
 }
 
-start().catch((error) => {
+if (require.main === module) start().catch((error) => {
   console.error("Erro ao iniciar MiqFlix:", error);
   process.exit(1);
 });
+
+module.exports = app;

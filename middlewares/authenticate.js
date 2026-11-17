@@ -45,12 +45,16 @@ module.exports = async function authenticate(
   }
 
   try {
-    const user = await User.findById(userId);
+    const user = await User.findById(userId).select("+sessionVersion");
 
     if (!user) {
       return res.status(401).json({
         error: "Usuário não encontrado.",
       });
+    }
+
+    if ((payload.sv ?? 0) !== (user.sessionVersion || 0)) {
+      return res.status(401).json({ error: "Sessão inválida ou expirada." });
     }
 
     req.user = user;
