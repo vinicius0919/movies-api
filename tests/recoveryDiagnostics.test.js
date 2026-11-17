@@ -7,7 +7,7 @@ const rate = require("../services/recoveryRateLimit");
 const controller = require("../controllers/passwordRecoveryController");
 const secret = "sensitive-placeholder-never-log";
 const cases = [
-  ["configuration", mail, "configuration", { code: "RECOVERY_SMTP_INVALID" }, "invalid_smtp_configuration"],
+  ["configuration", mail, "configuration", { code: "RECOVERY_RESEND_INVALID" }, "invalid_resend_configuration"],
   ["account_rate_limit", rate, "allow", { name: "MongoNetworkError" }, "database_connection_failed"],
   ["token_generation", crypto, "randomBytes", {}, "unexpected_failure"],
   ["token_hashing", crypto, "createHash", {}, "unexpected_failure"],
@@ -37,24 +37,4 @@ test("IP limiter uses safe stage and category without serializing database error
   await rate.ipLimit("forgot", 10)({ ip: "127.0.0.1" }, response, () => assert.fail("must fail closed"));
   assert.equal(response.code, 503);
   assert.deepEqual(logs, [["[PASSWORD RECOVERY] Rate limit storage unavailable stage=ip_rate_limit category=database_permission_denied"]]);
-});
-
-test("SMTP diagnostics distinguish timeout phase, socket and TLS errors without raw fields", (t) => {
-  const logs = [];
-  t.mock.method(console, "error", (...args) => logs.push(args));
-  const { logFailure } = require("../services/recoveryDiagnostics");
-  const cases = [
-    [{ code: "ETIMEDOUT", timeoutType: "CONNECT_TIMEOUT" }, "smtp_connection_timeout"],
-    [{ code: "ETIMEDOUT", timeoutType: "UPGRADE_TIMEOUT" }, "smtp_tls_timeout"],
-    [{ code: "ETIMEDOUT", timeoutType: "GREETING_TIMEOUT" }, "smtp_greeting_timeout"],
-    [{ code: "ETIMEDOUT", timeoutType: "SOCKET_TIMEOUT" }, "smtp_socket_timeout"],
-    [{ code: "ETIMEDOUT", timeoutType: secret }, "smtp_timeout"],
-    [{ code: "ESOCKET" }, "smtp_socket_error"],
-    [{ code: "ETLS" }, "smtp_tls_error"],
-  ];
-  for (const [fields, category] of cases) {
-    logFailure("Email delivery failed", "email_delivery", Object.assign(new Error(secret), fields, { response: secret, command: secret }));
-    assert.deepEqual(logs.at(-1), [`[PASSWORD RECOVERY] Email delivery failed stage=email_delivery category=${category}`]);
-  }
-  assert.ok(!JSON.stringify(logs).includes(secret));
 });

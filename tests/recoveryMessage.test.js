@@ -1,59 +1,66 @@
-const { test, beforeEach } = require("node:test");
+const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const nodemailer = require("nodemailer");
-const { sendResetEmail } = require("../services/recoveryEmailService");
-const { logFailure } = require("../services/recoveryDiagnostics");
-beforeEach(() => {
-  Object.assign(process.env, { NODE_ENV: "test", PASSWORD_RECOVERY_DIAGNOSTICS: "true", PASSWORD_RESET_ORIGIN: "https://fixture.example", SMTP_HOST: "127.0.0.1", SMTP_PORT: "1025", SMTP_FROM: "MiqFlix <sender@example.com>", SMTP_SECURE: "false" });
-  delete process.env.SMTP_USER; delete process.env.SMTP_PASS;
+const client = require("../services/resendClient");
+// Every test installs a fetch mock. These tests never contact Resend.
+const message = { from: "sender@example.com", to: "recipient@example.com", subject: "fixture", text: "fixture" };
+const response = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, async json() { return body; } });
+test("uses documented fixed HTTPS endpoint, backend Bearer key and bounded abort signal", async (t) => {
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "https://api.resend.com/emails");
+    assert.equal(options.method, "POST"); assert.equal(options.redirect, "error");
+    assert.equal(options.headers.Authorization, "Bearer test-only-key");
+    assert.equal(options.headers["Content-Type"], "application/json");
+    assert.ok(options.signal instanceof AbortSignal);
+    assert.deepEqual(JSON.parse(options.body), message);
+    return response({ id: "fixture-id" });
+  });
+  assert.deepEqual(await client.send(message, "test-only-key"), { data: { id: "fixture-id" }, error: null });
 });
-test("message uses configured sender, normalized recipient argument, subject and escaped trusted reset link", async (t) => {
-  let message;
-  t.mock.method(nodemailer, "createTransport", () => ({ async sendMail(value) { message = value; return { accepted: ["recipient@example.com"], rejected: [] }; } }));
-  const token = "a".repeat(64);
-  await sendResetEmail("recipient@example.com", token);
-  assert.equal(message.from, process.env.SMTP_FROM);
-  assert.equal(message.to, "recipient@example.com");
-  assert.equal(message.subject, "Redefina sua senha do MiqFlix");
-  assert.ok(message.text.includes(`https://fixture.example/reset-password#token=${token}`));
-  assert.ok(message.html.includes(`href="https://fixture.example/reset-password#token=${token}"`));
-  assert.ok(message.html.includes("30 minutos"));
-  assert.ok(!Object.hasOwn(message, "password"));
-});
-for (const [code, command, category] of [["EENVELOPE", "RCPT TO", "smtp_envelope_rejected"], ["EMESSAGE", "DATA", "smtp_message_rejected"]]) {
-  test(`awaited ${code} rejection retains error identity and logs safe SMTP operation`, async (t) => {
-    const secret = "never-log-payload";
-    const error = Object.assign(new Error(secret), { code, command, responseCode: 550, response: secret, rejected: ["recipient@example.com"] });
-    const logs = [];
-    t.mock.method(console, "error", (...args) => logs.push(args));
-    t.mock.method(nodemailer, "createTransport", () => ({ async sendMail() { await Promise.resolve(); throw error; } }));
-    await assert.rejects(sendResetEmail("recipient@example.com", "b".repeat(64)), (caught) => {
-      assert.equal(caught, error);
-      logFailure("Email delivery failed", "email_delivery", caught);
-      return true;
-    });
-    assert.deepEqual(logs, [[`[PASSWORD RECOVERY] Email delivery failed stage=email_delivery category=${category} operation=smtp_send error_name=Error code=${code} command=${command.replaceAll(" ", "_")} smtp_status=550`]]);
-    assert.ok(!JSON.stringify(logs).includes(secret));
-    assert.ok(!JSON.stringify(logs).includes("recipient@example.com"));
+for (const [status, body, expected] of [
+  [401, { name: "validation_error", message: "API key is invalid" }, "RESEND_AUTHENTICATION"],
+  [403, { name: "restricted_api_key", message: "API key is not active" }, "RESEND_AUTHENTICATION"],
+  [403, { name: "validation_error", message: "The example.com domain is not verified. Please, add and verify your domain." }, "RESEND_DOMAIN_UNVERIFIED"],
+  [403, { name: "validation_error", message: "You can only send testing emails to your own email address (private@example.com). To send emails to other recipients, please verify a domain." }, "RESEND_RECIPIENT_UNAUTHORIZED"],
+  [403, { name: "invalid_permission", message: "private" }, "RESEND_FORBIDDEN"],
+  [429, { name: "rate_limit_exceeded" }, "RESEND_RATE_LIMIT"],
+  [503, { name: "service_unavailable" }, "RESEND_UNAVAILABLE"],
+  [422, { name: "validation_error", message: "private" }, "RESEND_REJECTED"],
+  [200, { error: { name: "validation_error", message: "private" }, id: "not-success" }, "RESEND_REJECTED"],
+  [200, {}, "RESEND_INVALID_RESPONSE"],
+  [200, { id: "" }, "RESEND_INVALID_RESPONSE"],
+]) {
+  test(`returned API failure ${status} / ${expected} is not success`, async (t) => {
+    t.mock.method(globalThis, "fetch", async () => response(body, status));
+    const result = await client.send(message, "test-only-key");
+    assert.equal(result.data, null); assert.equal(result.error.code, expected);
+    assert.equal(result.error.message, "Recovery email delivery failed");
+    assert.ok(!JSON.stringify(result.error).includes("private"));
   });
 }
-test("local transport construction and post-send acceptance failures identify different operations", async (t) => {
-  const logs = [];
-  t.mock.method(console, "error", (...args) => logs.push(args));
-  const create = t.mock.method(nodemailer, "createTransport", () => { throw new TypeError("private data"); });
-  await assert.rejects(sendResetEmail("recipient@example.com", "c".repeat(64)), (error) => { logFailure("Email delivery failed", "email_delivery", error); return true; });
-  assert.ok(logs[0][0].includes("operation=smtp_transport error_name=TypeError code=unknown command=unknown"));
-  create.mock.mockImplementation(() => ({ async sendMail() { return { accepted: [], rejected: ["recipient@example.com"] }; } }));
-  await assert.rejects(sendResetEmail("recipient@example.com", "d".repeat(64)), (error) => { logFailure("Email delivery failed", "email_delivery", error); return true; });
-  assert.ok(logs[1][0].includes("operation=smtp_acceptance error_name=Error code=RECOVERY_SMTP_NOT_ACCEPTED"));
+for (const [error, expected] of [
+  [new TypeError("private endpoint"), "RESEND_CONNECTION"],
+  [Object.assign(new Error("private"), { name: "TimeoutError" }), "RESEND_TIMEOUT"],
+  [Object.assign(new Error("private"), { cause: { code: "UND_ERR_CONNECT_TIMEOUT" } }), "RESEND_TIMEOUT"],
+]) {
+  test(`thrown transport failure becomes safe ${expected}`, async (t) => {
+    t.mock.method(globalThis, "fetch", async () => { throw error; });
+    const result = await client.send(message, "test-only-key");
+    assert.equal(result.error.code, expected); assert.equal(result.data, null);
+    assert.ok(!JSON.stringify(result.error).includes("private"));
+  });
+}
+test("abort signal enforces timeout, including response reading", async (t) => {
+  const reason = new DOMException("private", "TimeoutError");
+  t.mock.method(AbortSignal, "timeout", (ms) => { assert.equal(ms, 20000); return AbortSignal.abort(reason); });
+  t.mock.method(globalThis, "fetch", async (_url, options) => ({ ok: true, status: 200, async json() { throw options.signal.reason; } }));
+  assert.equal((await client.send(message, "test-only-key")).error.code, "RESEND_TIMEOUT");
 });
-test("diagnostic fields discard injected values and can be disabled", (t) => {
-  const logs = [];
-  t.mock.method(console, "error", (...args) => logs.push(args));
-  const secret = "secret@example.com";
-  logFailure("Email delivery failed", "email_delivery", { name: secret, code: secret, command: `RCPT TO:<${secret}>`, responseCode: secret, message: secret });
-  assert.ok(logs[0][0].endsWith("operation=unknown error_name=unknown code=unknown command=unknown smtp_status=unknown"));
-  process.env.PASSWORD_RECOVERY_DIAGNOSTICS = "false";
-  logFailure("Email delivery failed", "email_delivery", { code: "EMESSAGE", command: "DATA", responseCode: 550 });
-  assert.deepEqual(logs[1], ["[PASSWORD RECOVERY] Email delivery failed stage=email_delivery category=smtp_message_rejected"]);
+test("non-JSON provider result never leaks the response body", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => ({ ok: false, status: 502, async json() { throw new SyntaxError("private response"); } }));
+  assert.equal((await client.send(message, "test-only-key")).error.code, "RESEND_INVALID_RESPONSE");
+});
+
+test("connection interrupted while reading response remains a connection failure", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => ({ ok: true, status: 200, async json() { throw new TypeError("private connection detail"); } }));
+  assert.equal((await client.send(message, "test-only-key")).error.code, "RESEND_CONNECTION");
 });

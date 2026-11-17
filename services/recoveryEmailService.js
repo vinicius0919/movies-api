@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+const resendClient = require("./resendClient");
 const { annotateEmailFailure } = require("./recoveryDiagnostics");
 function configuration() {
   let origin;
@@ -12,13 +12,12 @@ function configuration() {
       (process.env.NODE_ENV === "production" && origin.protocol !== "https:")) {
     throw Object.assign(new Error("Invalid recovery origin"), { code: "RECOVERY_ORIGIN_INVALID" });
   }
-  const port = Number(process.env.SMTP_PORT);
-  if (!process.env.SMTP_HOST || !process.env.SMTP_FROM || /[\r\n]/.test(process.env.SMTP_FROM) ||
-      !Number.isInteger(port) || port < 1 || port > 65535 ||
-      Boolean(process.env.SMTP_USER) !== Boolean(process.env.SMTP_PASS)) {
-    throw Object.assign(new Error("Missing SMTP configuration"), { code: "RECOVERY_SMTP_INVALID" });
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM;
+  if (!apiKey?.trim() || /[\r\n]/.test(apiKey) || !from?.trim() || /[\r\n]/.test(from)) {
+    throw Object.assign(new Error("Missing Resend configuration"), { code: "RECOVERY_RESEND_INVALID" });
   }
-  return { origin: origin.origin, port };
+  return { origin: origin.origin, apiKey, from };
 }
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -26,32 +25,22 @@ function escapeHtml(value) {
 async function sendResetEmail(email, token) {
   let operation = "configuration";
   try {
-    const { origin, port } = configuration();
+    const { origin, apiKey, from } = configuration();
     // Fragment is never sent to HTTP servers or included in Referer headers.
     operation = "recovery_link";
     const url = `${origin}/reset-password#token=${token}`;
-    operation = "smtp_transport";
-    const transport = nodemailer.createTransport({
-      host: process.env.SMTP_HOST, port,
-      secure: process.env.SMTP_SECURE === "true",
-      requireTLS: process.env.NODE_ENV === "production" && process.env.SMTP_SECURE !== "true",
-      auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
-      // Match the independently verified SMTP profile. A short HTTP response does not
-      // imply a short SMTP handshake or final message acknowledgement.
-      connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
-      logger: false, debug: false,
-    });
     operation = "message_build";
     const message = {
-      from: process.env.SMTP_FROM, to: email, subject: "Redefina sua senha do MiqFlix",
+      from, to: email, subject: "Redefina sua senha do MiqFlix",
       text: `Recebemos uma solicitação para redefinir sua senha do MiqFlix. Acesse: ${url}\nO link expira em 30 minutos e só pode ser usado uma vez. Se não solicitou a alteração, ignore este e-mail.`,
       html: `<div style="background:#09090d;color:#f5f5f7;padding:32px;font-family:Arial,sans-serif"><h1 style="color:#e50914">MiqFlix</h1><h2>Redefina sua senha</h2><p>Recebemos uma solicitação para redefinir sua senha.</p><p><a style="display:inline-block;background:#e50914;color:white;padding:14px 20px;border-radius:8px" href="${escapeHtml(url)}">Redefinir senha</a></p><p>O link expira em 30 minutos e só pode ser usado uma vez.</p><p>Se você não fez esta solicitação, ignore este e-mail. Sua senha permanece a mesma.</p></div>`,
     };
-    operation = "smtp_send";
-    const result = await transport.sendMail(message);
-    operation = "smtp_acceptance";
-    if (!result.accepted?.length || result.rejected?.length) {
-      throw Object.assign(new Error("SMTP rejected delivery"), { code: "RECOVERY_SMTP_NOT_ACCEPTED" });
+    operation = "resend_send";
+    const result = await resendClient.send(message, apiKey);
+    if (result?.error) throw result.error;
+    operation = "resend_acceptance";
+    if (!result?.data?.id) {
+      throw Object.assign(new Error("Resend did not confirm acceptance"), { code: "RESEND_INVALID_RESPONSE" });
     }
   } catch (error) {
     annotateEmailFailure(error, operation);

@@ -35,9 +35,8 @@ async function seedToken(expires = new Date(Date.now() + 1800000)) {
 before(async () => {
   process.env.JWT_SECRET = "test-secret-with-at-least-thirty-two-characters";
   process.env.PASSWORD_RESET_ORIGIN = "http://localhost:5173";
-  process.env.SMTP_HOST = "127.0.0.1";
-  process.env.SMTP_PORT = "1025";
-  process.env.SMTP_FROM = "MiqFlix <no-reply@example.com>";
+  process.env.RESEND_API_KEY = "test-key-not-real";
+  process.env.RESEND_FROM = "MiqFlix <no-reply@example.com>";
   mongo = await MongoMemoryServer.create();
   await mongoose.connect(mongo.getUri());
   await Promise.all([User.init(), Counter.init()]);
@@ -124,7 +123,7 @@ test("IP rate limiting ignores spoofed forwarded headers and has Retry-After", a
   const result = await request(app).post(endpoint("forgot-password")).send({ email: user.email });
   assert.equal(result.status, 429); assert.equal(result.headers["retry-after"], "1800");
 });
-test("SMTP failure invalidates token and logs no sensitive data", async () => {
+test("Email failure invalidates token and logs no sensitive data", async () => {
   failMail = true;
   const logs = [];
   const original = console.error;
@@ -136,12 +135,12 @@ test("SMTP failure invalidates token and logs no sensitive data", async () => {
     assert.ok(logs.every((line) => !line.includes(delivered[0].token) && !line.includes(user.email)));
   } finally { console.error = original; }
 });
-test("missing SMTP configuration fails equally for any account", async () => {
-  const host = process.env.SMTP_HOST;
-  delete process.env.SMTP_HOST;
+test("missing Resend configuration fails equally for any account", async () => {
+  const key = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
   try {
     for (const email of [user.email, "missing@example.com"]) assert.equal((await request(app).post(endpoint("forgot-password")).send({ email })).status, 503);
-  } finally { process.env.SMTP_HOST = host; }
+  } finally { process.env.RESEND_API_KEY = key; }
 });
 test("recovery origin must be trusted configuration, production requires HTTPS", () => {
   const origin = process.env.PASSWORD_RESET_ORIGIN;

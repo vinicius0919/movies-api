@@ -1,76 +1,61 @@
-const { test, before, after } = require("node:test");
+const { test, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
-const { SMTPServer } = require("smtp-server");
-const { sendResetEmail } = require("../services/recoveryEmailService");
-let server, raw, reject;
-before(async () => {
-  server = new SMTPServer({
-    authOptional: true, disabledCommands: ["STARTTLS", "AUTH"], logger: false,
-    onRcptTo(_address, _session, callback) { callback(reject ? new Error("Rejected") : undefined); },
-    onData(stream, _session, callback) {
-      raw = "";
-      stream.on("data", (chunk) => { raw += chunk.toString(); });
-      stream.on("end", () => callback());
-    },
-  });
-  await new Promise((resolve, fail) => { server.once("error", fail); server.listen(0, "127.0.0.1", resolve); });
-  process.env.SMTP_HOST = "127.0.0.1";
-  process.env.SMTP_PORT = String(server.server.address().port);
-  process.env.SMTP_FROM = "MiqFlix <no-reply@example.com>";
-  process.env.SMTP_SECURE = "false";
-  process.env.PASSWORD_RESET_ORIGIN = "https://miqflix.example";
-  delete process.env.SMTP_USER; delete process.env.SMTP_PASS;
+const client = require("../services/resendClient");
+const { sendResetEmail, configuration } = require("../services/recoveryEmailService");
+const { logFailure } = require("../services/recoveryDiagnostics");
+beforeEach(() => {
+  Object.assign(process.env, { NODE_ENV: "test", PASSWORD_RESET_ORIGIN: "https://fixture.example", RESEND_API_KEY: "test-only-key", RESEND_FROM: "MiqFlix <sender@example.com>", PASSWORD_RECOVERY_DIAGNOSTICS: "false" });
 });
-after(async () => { await new Promise((resolve) => server.close(resolve)); });
-test("SMTP transport sends branded text and HTML mail with trusted fragment URL and 30-minute expiry", async () => {
+test("Resend message preserves sender, recipient, subject, HTML, text and trusted fragment link", async (t) => {
+  let message;
+  t.mock.method(client, "send", async (value, key) => { message = value; assert.equal(key, "test-only-key"); return { data: { id: "fixture-id" }, error: null }; });
   const token = "a".repeat(64);
-  await sendResetEmail("person@example.com", token);
-  assert.match(raw, /To: person@example.com/);
-  assert.match(raw, /multipart\/alternative/);
-  assert.match(raw, /text\/plain/);
-  assert.match(raw, /text\/html/);
-  const decoded = raw.replace(/=\r\n/g, "").replace(/=([0-9A-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-  assert.ok(decoded.includes(`https://miqflix.example/reset-password#token=${token}`));
-  assert.ok(decoded.includes("30 minutos"));
-  assert.ok(decoded.includes("MiqFlix"));
-  assert.ok(decoded.includes("ignore este e-mail"));
+  await sendResetEmail("recipient@example.com", token);
+  assert.equal(message.from, process.env.RESEND_FROM);
+  assert.equal(message.to, "recipient@example.com");
+  assert.equal(message.subject, "Redefina sua senha do MiqFlix");
+  assert.ok(message.text.includes(`https://fixture.example/reset-password#token=${token}`));
+  assert.ok(message.html.includes(`href="https://fixture.example/reset-password#token=${token}"`));
+  assert.ok(message.html.includes("30 minutos"));
+  assert.ok(message.text.includes("ignore este e-mail"));
+  assert.deepEqual(Object.keys(message).sort(), ["from", "html", "subject", "text", "to"]);
 });
-test("SMTP rejection rejects promise rather than claiming delivery", async () => {
-  reject = true;
-  await assert.rejects(sendResetEmail("person@example.com", "b".repeat(64)));
+test("non-throwing client error is rejected even when data contains an id", async (t) => {
+  const failure = Object.assign(new Error("safe"), { code: "RESEND_RECIPIENT_UNAUTHORIZED" });
+  t.mock.method(client, "send", async () => ({ data: { id: "not-success" }, error: failure }));
+  await assert.rejects(sendResetEmail("recipient@example.com", "b".repeat(64)), (error) => error === failure);
 });
-
-test("transport matches validated timeouts and preserves implicit TLS and required STARTTLS", async (t) => {
-  const nodemailer = require("nodemailer");
-  const original = { ...process.env };
-  const transports = [];
-  t.mock.method(nodemailer, "createTransport", (options) => {
-    transports.push(options);
-    return { async sendMail() { return { accepted: ["fixture@example.com"], rejected: [] }; } };
-  });
-  try {
-    process.env.NODE_ENV = "production";
-    process.env.SMTP_PORT = "465";
-    process.env.SMTP_SECURE = "true";
-    await sendResetEmail("fixture@example.com", "c".repeat(64));
-    assert.equal(transports[0].secure, true);
-    assert.equal(transports[0].requireTLS, false);
-    process.env.SMTP_PORT = "587";
-    process.env.SMTP_SECURE = "false";
-    await sendResetEmail("fixture@example.com", "d".repeat(64));
-    assert.equal(transports[1].secure, false);
-    assert.equal(transports[1].requireTLS, true);
-    for (const transport of transports) {
-      assert.equal(transport.connectionTimeout, 15000);
-      assert.equal(transport.greetingTimeout, 15000);
-      assert.equal(transport.socketTimeout, 20000);
-      assert.equal(transport.logger, false);
-      assert.equal(transport.debug, false);
-      assert.notEqual(transport.tls?.rejectUnauthorized, false);
-    }
-  } finally {
-    for (const key of ["NODE_ENV", "SMTP_PORT", "SMTP_SECURE"]) {
-      if (original[key] === undefined) delete process.env[key]; else process.env[key] = original[key];
-    }
+test("missing acceptance is a failure", async (t) => {
+  t.mock.method(client, "send", async () => ({ data: null, error: null }));
+  await assert.rejects(sendResetEmail("recipient@example.com", "c".repeat(64)), { code: "RESEND_INVALID_RESPONSE" });
+});
+test("missing key or sender fails before any client call", async (t) => {
+  const mock = t.mock.method(client, "send", () => assert.fail("must not send"));
+  for (const field of ["RESEND_API_KEY", "RESEND_FROM"]) {
+    const value = process.env[field]; delete process.env[field];
+    assert.throws(configuration, { code: "RECOVERY_RESEND_INVALID" });
+    process.env[field] = value;
   }
+  assert.equal(mock.mock.callCount(), 0);
+});
+for (const [code, category] of [
+  ["RESEND_CONNECTION", "resend_connection_failed"], ["RESEND_TIMEOUT", "resend_timeout"],
+  ["RESEND_AUTHENTICATION", "resend_authentication_failed"], ["RESEND_DOMAIN_UNVERIFIED", "resend_domain_unverified"],
+  ["RESEND_RECIPIENT_UNAUTHORIZED", "resend_recipient_unauthorized"], ["RESEND_FORBIDDEN", "resend_permission_denied"],
+]) {
+  test(`safe diagnosis: ${category}`, async (t) => {
+    const logs = [];
+    process.env.PASSWORD_RECOVERY_DIAGNOSTICS = "true";
+    t.mock.method(console, "error", (...args) => logs.push(args));
+    t.mock.method(client, "send", async () => ({ data: null, error: Object.assign(new Error("never-log-secret"), { code, status: 403, response: "recipient@example.com" }) }));
+    await assert.rejects(sendResetEmail("recipient@example.com", "d".repeat(64)), (error) => { logFailure("Email delivery failed", "email_delivery", error); return true; });
+    assert.deepEqual(logs, [[`[PASSWORD RECOVERY] Email delivery failed stage=email_delivery category=${category} operation=resend_send error_name=Error code=${code} http_status=403`]]);
+  });
+}
+test("diagnostics discard arbitrary names, codes, statuses and provider messages", (t) => {
+  process.env.PASSWORD_RECOVERY_DIAGNOSTICS = "true";
+  const logs = [];
+  t.mock.method(console, "error", (...args) => logs.push(args));
+  logFailure("Email delivery failed", "email_delivery", { name: "secret", code: "secret", status: "secret", message: "secret", response: "secret" });
+  assert.deepEqual(logs, [["[PASSWORD RECOVERY] Email delivery failed stage=email_delivery category=unexpected_failure operation=unknown error_name=unknown code=unknown http_status=unknown"]]);
 });
