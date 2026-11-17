@@ -12,6 +12,7 @@ const seriesRoutes = require("./routes/series");
 const tmdbRoutes = require("./routes/tmdb");
 const streamRoutes = require("./routes/stream");
 const subscriptionsRoutes = require("./routes/subscriptions");
+const adminSubscriptionsRoutes = require("./routes/adminSubscriptions");
 const collectionsRoutes =  require("./routes/collections")
 const app = express();
 // Set exact trusted proxy IPs/CIDRs in deployment; never blindly trust client headers.
@@ -34,7 +35,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 const allowedOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  "http://192.168.7.8:5173",
+  "http://192.168.7.11:5173",
   "http://192.168.1.2:5173",
   "https://endless-properly-unicorn.ngrok-free.app/",
   process.env.FRONTEND_URL,
@@ -78,6 +79,7 @@ app.use("/api/tmdb", tmdbRoutes);
 app.use("/api/collections", collectionsRoutes);
 app.use("/api/stream", streamRoutes);
 app.use("/api/subscriptions", subscriptionsRoutes);
+app.use("/api/admin/subscriptions", adminSubscriptionsRoutes);
 
 // ============================================
 // HEALTH CHECK
