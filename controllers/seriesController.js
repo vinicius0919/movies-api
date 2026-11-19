@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 
 const Series = require("../models/Series");
 const User = require("../models/User");
+const { visibleDocumentQuery, isVisible } = require("../utils/publication");
 
 // =========================================
 // HELPERS
@@ -170,6 +171,7 @@ const EPISODE_FIELDS = [
   "still",
   "videoUrl",
   "sources",
+  "published",
 ];
 
 // Campos seguros para listagens.
@@ -234,7 +236,22 @@ const recalculateTotals = (series) => {
 const getVisibilityFilter = (req) =>
   isAdminUser(req)
     ? {}
-    : { published: true };
+    : visibleDocumentQuery();
+
+const filterPublicEpisodes = (series) => {
+  if (!series || !Array.isArray(series.seasons)) return series;
+
+  return {
+    ...series,
+    seasons: series.seasons.map((season) => ({
+      ...season,
+      // Episódios legados sem published continuam visíveis.
+      episodes: (season.episodes || []).filter((episode) =>
+        isVisible(episode.published),
+      ),
+    })),
+  };
+};
 
 // =========================================
 // GET ALL SERIES - ADMIN
@@ -258,9 +275,7 @@ async function getSeries(req, res) {
 
 async function getSeriesCatalog(req, res) {
   try {
-    const series = await Series.find({
-      published: true,
-    })
+    const series = await Series.find(visibleDocumentQuery())
       .select(CATALOG_FIELDS.join(" "))
       .sort({ createdAt: -1 })
       .lean();
@@ -290,7 +305,7 @@ async function getSeriesById(req, res) {
     // somente séries publicadas.
     const series = await Series.findOne({
       _id: id,
-      published: true,
+      ...visibleDocumentQuery(),
     })
       .select(PRIVATE_EPISODE_FIELDS)
       .lean();
@@ -301,7 +316,7 @@ async function getSeriesById(req, res) {
       });
     }
 
-    return res.json(series);
+    return res.json(filterPublicEpisodes(series));
   } catch (error) {
     return sendError(res, error);
   }
@@ -332,6 +347,8 @@ async function createSeries(req, res) {
     // pelos endpoints específicos.
     const series = await Series.create({
       ...data,
+      // Conteúdo novo começa oculto, mesmo que o cliente envie o campo.
+      published: false,
       seasons: [],
       totalSeasons: 0,
       totalEpisodes: 0,
@@ -378,6 +395,31 @@ async function updateSeries(req, res) {
       });
     }
 
+    return res.json(series);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function setSeriesPublication(req, res) {
+  if (req.body?.authorizationConfirmed !== true) {
+    return res.status(400).json({
+      error: "Confirme a autorização para disponibilizar este conteúdo.",
+    });
+  }
+
+  const published = req.body?.published === true;
+
+  try {
+    const series = await Series.findById(req.params.id);
+    if (!series) return res.status(404).json({ error: "Série não encontrada." });
+    if (published && series.validationStatus !== "validated") {
+      return res.status(409).json({ error: "Valide os metadados antes de publicar." });
+    }
+
+    series.published = published;
+    series.publishedAt = published ? new Date() : undefined;
+    await series.save();
     return res.json(series);
   } catch (error) {
     return sendError(res, error);
@@ -700,6 +742,8 @@ async function addEpisode(req, res) {
         EPISODE_FIELDS
       ),
       episodeNumber,
+      // Episódios novos começam ocultos, independentemente do payload.
+      published: false,
       views: 0,
     });
 
@@ -786,6 +830,34 @@ async function updateEpisode(req, res) {
 
     await series.save();
 
+    return res.json(series);
+  } catch (error) {
+    return sendError(res, error);
+  }
+}
+
+async function setEpisodePublication(req, res) {
+  if (req.body?.authorizationConfirmed !== true) {
+    return res.status(400).json({
+      error: "Confirme a autorização para disponibilizar este conteúdo.",
+    });
+  }
+
+  const published = req.body?.published === true;
+
+  try {
+    const series = await Series.findById(req.params.id);
+    if (!series) return res.status(404).json({ error: "Série não encontrada." });
+    const season = findSeason(series, parseNumber(req.params.season));
+    const episode = season && findEpisode(season, parseNumber(req.params.episode));
+    if (!episode) return res.status(404).json({ error: "Episódio não encontrado." });
+    if (published && episode.validationStatus !== "validated") {
+      return res.status(409).json({ error: "Valide os metadados antes de publicar." });
+    }
+
+    episode.published = published;
+    episode.publishedAt = published ? new Date() : undefined;
+    await series.save();
     return res.json(series);
   } catch (error) {
     return sendError(res, error);
@@ -893,7 +965,7 @@ async function getHomeSeries(req, res) {
     const featured = await Series.aggregate([
       {
         $match: {
-          published: true,
+          ...visibleDocumentQuery(),
         },
       },
       {
@@ -911,7 +983,7 @@ async function getHomeSeries(req, res) {
         const series = await Series.aggregate([
           {
             $match: {
-              published: true,
+              ...visibleDocumentQuery(),
               genres: genre,
             },
           },
@@ -1027,6 +1099,10 @@ async function addEpisodeView(req, res) {
             episodes: {
               $elemMatch: {
                 episodeNumber,
+                $or: [
+                  { published: true },
+                  { published: { $exists: false } },
+                ],
               },
             },
           },
@@ -1287,6 +1363,12 @@ async function getEpisodePlayback(req, res) {
       });
     }
 
+    if (!isVisible(selectedEpisode.published)) {
+      return res.status(404).json({
+        error: "Episódio não encontrado",
+      });
+    }
+
     const activeSource = [...(selectedEpisode.sources || [])]
       .filter((source) => source.active && source.url)
       .sort(
@@ -1359,6 +1441,7 @@ module.exports = {
 
   createSeries,
   updateSeries,
+  setSeriesPublication,
   deleteSeries,
 
   addSeason,
@@ -1367,6 +1450,7 @@ module.exports = {
 
   addEpisode,
   updateEpisode,
+  setEpisodePublication,
   deleteEpisode,
 
   getHomeSeries,

@@ -57,6 +57,18 @@ const episodeSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Sem default para que episódios legados sem o campo herdem a
+    // visibilidade da série.
+    published: {
+      type: Boolean,
+      index: true,
+    },
+    validationStatus: {
+      type: String,
+      enum: ["unreviewed", "pending", "validated", "rejected"],
+    },
+    publishedAt: Date,
+    tmdbValidatedAt: Date,
     videoUrl: {
       type: String,
       default: "",
@@ -131,9 +143,15 @@ const seriesSchema = new mongoose.Schema(
     },
     published: {
       type: Boolean,
-      default: false,
       index: true,
     },
+    validationStatus: {
+      type: String,
+      enum: ["unreviewed", "pending", "validated", "rejected"],
+      index: true,
+    },
+    publishedAt: Date,
+    tmdbValidatedAt: Date,
     totalSeasons: {
       type: Number,
       default: 0,

@@ -16,6 +16,20 @@ const movieSchema = new mongoose.Schema(
     backdrop: String,
 
     year: String,
+    // Campo sem default para preservar filmes legados que não possuem
+    // publicação definida. A criação de novos filmes define false
+    // explicitamente no service.
+    published: {
+      type: Boolean,
+      index: true,
+    },
+    validationStatus: {
+      type: String,
+      enum: ["unreviewed", "pending", "validated", "rejected"],
+      index: true,
+    },
+    publishedAt: Date,
+    tmdbValidatedAt: Date,
     favorite: {
       type: Boolean,
       default: false,

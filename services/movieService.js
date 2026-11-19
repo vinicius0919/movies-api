@@ -6,6 +6,7 @@ const streamRouter = require("./streamRouter");
 // Adiciona no topo
 const tmdbService = require("./tmdbService")
 const youtubeProvider = require("../providers/YoutubeProvider");
+const { visibleDocumentQuery } = require("../utils/publication");
 
 class MovieService {
     _applyGenres(movie, genres) {
@@ -45,7 +46,7 @@ async list({
     );
   }
 
-  const query = {};
+  const query = visibleDocumentQuery();
 
   if (search.trim()) {
     const escapedSearch = search
@@ -94,7 +95,7 @@ async list({
 
 
     async findById(id) {
-        const movie = await Movie.findById(id);
+        const movie = await Movie.findOne({ _id: id, ...visibleDocumentQuery() });
         if (!movie) return null;
 
         const obj = movie.toObject();
@@ -206,7 +207,11 @@ async list({
             data.genres || []
         );
     
-        return Movie.create(data);
+        return Movie.create({
+            ...data,
+            // Conteúdo novo nunca é publicado implicitamente.
+            published: false,
+        });
     }
 
     async update(id, data) {

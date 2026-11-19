@@ -12,6 +12,7 @@ const mongoose = require("mongoose");
 const streamRouter = require("../services/streamRouter");
 
 const youtubeProvider = require("../providers/YoutubeProvider");
+const { visibleDocumentQuery } = require("../utils/publication");
 
 function handleError(res, err) {
   const status = err.status || 500;
@@ -68,7 +69,10 @@ const getPlayback = async (req, res) => {
       });
     }
 
-    const movie = await Movie.findById(id).select("videoUrl").lean();
+    const movie = await Movie.findOne({
+      _id: id,
+      ...visibleDocumentQuery(),
+    }).select("videoUrl").lean();
 
     if (!movie) {
       return res.status(404).json({
@@ -102,6 +106,31 @@ const getPlayback = async (req, res) => {
       provider: "native",
       streamPath: `/api/stream/movies/${id}`,
     });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+const setPublication = async (req, res) => {
+  if (req.body?.authorizationConfirmed !== true) {
+    return res.status(400).json({
+      error: "Confirme a autorização para disponibilizar este conteúdo.",
+    });
+  }
+
+  const published = req.body?.published === true;
+
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) return res.status(404).json({ error: "Filme não encontrado." });
+    if (published && movie.validationStatus !== "validated") {
+      return res.status(409).json({ error: "Valide os metadados antes de publicar." });
+    }
+
+    movie.published = published;
+    movie.publishedAt = published ? new Date() : undefined;
+    await movie.save();
+    return res.json(movie);
   } catch (error) {
     return handleError(res, error);
   }
@@ -150,7 +179,7 @@ const getHome = async (req, res) => {
       createdAt: 1,
     };
 
-    const featuredMatch = {};
+    const featuredMatch = visibleDocumentQuery();
 
     if (search) {
       featuredMatch.title = {
@@ -180,6 +209,7 @@ const getHome = async (req, res) => {
         }
 
         const match = {
+          ...visibleDocumentQuery(),
           genres: genreRow,
         };
 
@@ -240,8 +270,8 @@ const addView = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const movie = await Movie.findByIdAndUpdate(
-      id,
+    const movie = await Movie.findOneAndUpdate(
+      { _id: id, ...visibleDocumentQuery() },
       {
         $inc: {
           views: 1,
@@ -485,6 +515,7 @@ module.exports = {
   addView,
   getById,
   getPlayback,
+  setPublication,
   create,
   update,
   remove,

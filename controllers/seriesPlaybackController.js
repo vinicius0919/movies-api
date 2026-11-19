@@ -2,6 +2,7 @@
 const mongoose = require("mongoose");
 const Series = require("../models/Series");
 const streamRouter = require("../services/streamRouter");
+const { visibleDocumentQuery, isVisible } = require("../utils/publication");
 
 function parseParams({ id, season, episode }) {
   if (!mongoose.isValidObjectId(id)) return null;
@@ -20,7 +21,10 @@ function parseParams({ id, season, episode }) {
 }
 
 async function findEpisodeSource({ id, seasonNumber, episodeNumber }) {
-  const series = await Series.findOne({ _id: id, published: true })
+  const series = await Series.findOne({
+    _id: id,
+    ...visibleDocumentQuery(),
+  })
     .select("seasons")
     .lean();
 
@@ -36,6 +40,10 @@ async function findEpisodeSource({ id, seasonNumber, episodeNumber }) {
   );
 
   if (!selectedEpisode) {
+    return { status: 404, error: "Episódio não encontrado." };
+  }
+
+  if (!isVisible(selectedEpisode.published)) {
     return { status: 404, error: "Episódio não encontrado." };
   }
 

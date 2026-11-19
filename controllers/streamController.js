@@ -1,6 +1,7 @@
 const streamRouter = require("../services/streamRouter");
 const mongoose = require("mongoose");
 const Movie = require("../models/Movie");
+const { visibleDocumentQuery } = require("../utils/publication");
 
 // =========================================
 // STREAM CONTROLLER
@@ -16,7 +17,10 @@ async function streamMovie(req, res) {
   }
 
   try {
-    const movie = await Movie.findById(id).select("videoUrl").lean();
+    const movie = await Movie.findOne({
+      _id: id,
+      ...visibleDocumentQuery(),
+    }).select("videoUrl").lean();
 
     if (!movie) {
       return res.status(404).json({

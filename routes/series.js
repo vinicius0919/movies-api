@@ -12,6 +12,7 @@ const {
 
   createSeries,
   updateSeries,
+  setSeriesPublication,
   deleteSeries,
 
   addSeason,
@@ -20,6 +21,7 @@ const {
 
   addEpisode,
   updateEpisode,
+  setEpisodePublication,
   deleteEpisode,
 
   addSeriesView,
@@ -148,6 +150,13 @@ router.put(
   updateSeries
 );
 
+router.patch(
+  "/:id/publication",
+  authenticate,
+  requireAdmin,
+  setSeriesPublication,
+);
+
 router.delete(
   "/:id",
   authenticate,
@@ -196,6 +205,13 @@ router.put(
   authenticate,
   requireAdmin,
   updateEpisode
+);
+
+router.patch(
+  "/:id/seasons/:season/episodes/:episode/publication",
+  authenticate,
+  requireAdmin,
+  setEpisodePublication,
 );
 
 router.delete(

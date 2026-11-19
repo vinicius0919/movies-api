@@ -52,6 +52,8 @@ router.post("/", authenticate, requireAdmin, c.create);
 
 router.put("/:id", authenticate, requireAdmin, c.update);
 
+router.patch("/:id/publication", authenticate, requireAdmin, c.setPublication);
+
 router.delete("/:id", authenticate, requireAdmin, c.remove);
 
 // =============================================
